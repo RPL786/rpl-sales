@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Sales Data Entry</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #f6f8fb;
+      color: #111827;
+    }
+
+    .wrap {
+      max-width: 1000px;
+      margin: 40px auto;
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+    }
+
+    h1, h2, h3 {
+      margin-top: 0;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field-full {
+      grid-column: 1 / -1;
+    }
+
+    label {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    input, select, button {
+      font: inherit;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #d1d5db;
+    }
+
+    button {
+      cursor: pointer;
+      border: none;
+      background: #4f46e5;
+      color: white;
+      font-weight: 700;
+    }
+
+    button.secondary {
+      background: #111827;
+    }
+
+    .row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    .msg {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      display: none;
+    }
+
+    .msg.ok {
+      background: #dcfce7;
+      color: #166534;
+      display: block;
+    }
+
+    .msg.err {
+      background: #fee2e2;
+      color: #991b1b;
+      display: block;
+    }
+
+    .top-links {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      gap: 10px;
+    }
+
+    a {
+      color: #4f46e5;
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    hr {
+      margin: 28px 0;
+      border: none;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 10px;
+      margin: 18px 0 22px;
+      flex-wrap: wrap;
+    }
+
+    .tab-btn {
+      background: #e5e7eb;
+      color: #111827;
+      border: 1px solid #d1d5db;
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .tab-btn.active {
+      background: #4f46e5;
+      color: white;
+      border-color: #4f46e5;
+    }
+
+    .tab-panel {
+      display: none;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    @media (max-width: 700px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top-links">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <img src="/logo.png" alt="Company Logo" style="height:56px;width:auto;object-fit:contain;" />
+          <h1 style="margin:0;">Sales Data Entry</h1>
+        </div>
+        <a href="/" target="_blank">Open Dashboard</a>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button type="button" id="tab-sales-btn" class="tab-btn active" onclick="showTab('sales')">Sale Data Entry</button>
+      <button type="button" id="tab-visit-btn" class="tab-btn" onclick="showTab('visit')">Visit / Meeting Entry</button>
+    </div>
+
+    <hr style="margin:24px 0;" />
+
+    <h2>Admin</h2>
+
+    <div class="grid">
+      <div class="field">
+        <label for="clear_db_password">Clear Database Password</label>
+        <input id="clear_db_password" type="password" placeholder="Enter password" />
+      </div>
+    </div>
+
+    <button type="button" onclick="clearDatabase()">Clear Database</button>
+
+    <!-- SALES TAB START -->
+    <div id="sales-tab" class="tab-panel active">
+      <h2>Manage Teams</h2>
+      <div class="grid">
+        <div class="field">
+          <label for="team_manage_old">Existing Team</label>
+          <select id="team_manage_old"></select>
+        </div>
+        <div class="field">
+          <label for="team_manage_new">New Team Name</label>
+          <input id="team_manage_new" placeholder="Enter new team name" />
+        </div>
+      </div>
+      <div class="row">
+        <button type="button" onclick="addTeam()">Add Team</button>
+        <button type="button" class="secondary" onclick="renameTeam()">Rename Team</button>
+      </div>
+
+      <hr />
+
+      <h2>Manual Entry</h2>
+      <div class="grid">
+        <div class="field">
+          <label for="team_select">Team</label>
+          <select id="team_select" onchange="handleEntryTeamChange()"></select>
+        </div>
+        <div class="field">
+          <label for="team_new">Or Add New Team</label>
+          <input id="team_new" placeholder="Enter new team name" />
+        </div>
+
+        <div class="field">
+          <label for="sales_person_select">Sales Person</label>
+          <select id="sales_person_select" disabled></select>
+        </div>
+        <div class="field">
+          <label for="sales_person_new">Or Add New Sales Person</label>
+          <input id="sales_person_new" placeholder="Enter new sales person" />
+        </div>
+
+        <div class="field">
+          <label for="client_select">Client</label>
+          <select id="client_select" disabled></select>
+        </div>
+        <div class="field">
+          <label for="client_new">Or Add New Client</label>
+          <input id="client_new" placeholder="Enter new client" />
+        </div>
+
+        <div class="field">
+          <label for="product_select">Product</label>
+          <select id="product_select" disabled></select>
+        </div>
+        <div class="field">
+          <label for="product_new">Or Add New Product</label>
+          <input id="product_new" placeholder="Enter new product" />
+        </div>
+
+        <div class="field">
+          <label for="entry_date">Date</label>
+          <input id="entry_date" type="date" />
+        </div>
+        <div class="field">
+          <label for="quantity">Quantity</label>
+          <input id="quantity" type="number" step="any" placeholder="Enter quantity" />
+        </div>
+      </div>
+
+      <div class="row">
+        <button type="button" onclick="saveEntry()">Save Entry</button>
+      </div>
+
+      <hr />
+
+      <div class="grid">
+        <div class="field">
+          <label for="upload_mode">Upload Mode</label>
+          <select id="upload_mode">
+            <option value="append">Append (add to existing team data)</option>
+            <option value="replace">Replace (remove old team data first)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="field">
+          <label for="upload_team_select">Team</label>
+          <select id="upload_team_select"></select>
+        </div>
+        <div class="field">
+          <label for="upload_team_new">Or Add New Team</label>
+          <input id="upload_team_new" placeholder="Enter new team name for this file" />
+        </div>
+        <div class="field field-full">
+          <label for="excel_file">Excel File</label>
+          <input id="excel_file" type="file" accept=".xlsx,.xls" />
+        </div>
+      </div>
+
+      <div class="row">
+        <button type="button" class="secondary" onclick="uploadExcel()">Upload Excel</button>
+      </div>
+    </div>
+    <!-- SALES TAB END -->
+
+    <!-- VISIT TAB START -->
+    <div id="visit-tab" class="tab-panel">
+      <h2>Visit / Meeting Entry</h2>
+      <div class="grid">
+        <div class="field">
+          <label for="visit_team_select">Team</label>
+          <select id="visit_team_select"></select>
+        </div>
+        <div class="field">
+          <label for="visit_team_new">Or Add New Team</label>
+          <input id="visit_team_new" placeholder="Enter team name" />
+        </div>
+
+        <div class="field">
+          <label for="visit_sales_person_select">Sales Person</label>
+          <select id="visit_sales_person_select"></select>
+        </div>
+        <div class="field">
+          <label for="visit_sales_person_new">Or Add New Sales Person</label>
+          <input id="visit_sales_person_new" placeholder="Enter sales person" />
+        </div>
+
+        <div class="field">
+          <label for="visit_client_select">Client</label>
+          <select id="visit_client_select"></select>
+        </div>
+        <div class="field">
+          <label for="visit_client_new">Or Add New Client</label>
+          <input id="visit_client_new" placeholder="Enter client" />
+        </div>
+
+        <div class="field">
+          <label for="visit_product_select">Product</label>
+          <select id="visit_product_select"></select>
+        </div>
+        <div class="field">
+          <label for="visit_product_new">Or Add New Product</label>
+          <input id="visit_product_new" placeholder="Enter product" />
+        </div>
+
+        <div class="field">
+          <label for="visit_date">Meeting Date</label>
+          <input id="visit_date" type="date" />
+        </div>
+        <div class="field">
+          <label for="visit_time">Meeting Time</label>
+          <input id="visit_time" type="time" />
+        </div>
+
+        <div class="field">
+          <label for="meeting_type">Meeting Type</label>
+          <select id="meeting_type">
+            <option value="">Select meeting type</option>
+            <option>Initial Visit</option>
+            <option>Follow-up</option>
+            <option>Closing</option>
+            <option>Future Scheduled</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="meeting_status">Meeting Status</label>
+          <select id="meeting_status">
+            <option value="">Select status</option>
+            <option>Interested</option>
+            <option>Thinking</option>
+            <option>No Response</option>
+            <option>Rejected</option>
+            <option>Need Follow-up</option>
+            <option>Order Received</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="client_response">Client Response</label>
+          <input id="client_response" placeholder="Price issue / sample / quality / competitor" />
+        </div>
+
+        <div class="field">
+          <label for="order_amount">Order Amount</label>
+          <input id="order_amount" type="number" step="any" placeholder="0" />
+        </div>
+
+        <div class="field">
+          <label for="future_potential">Future Potential (%)</label>
+          <input id="future_potential" type="number" min="0" max="100" step="1" placeholder="50" />
+        </div>
+
+        <div class="field">
+          <label for="next_meeting_date">Next Meeting Date</label>
+          <input id="next_meeting_date" type="date" />
+        </div>
+
+        <div class="field">
+          <label for="next_meeting_time">Next Meeting Time</label>
+          <input id="next_meeting_time" type="time" />
+        </div>
+
+        <div class="field field-full">
+          <label for="visit_notes">Meeting Notes</label>
+          <input id="visit_notes" placeholder="What happened, next step, objection, expected output" />
+        </div>
+      </div>
+
+      <div class="row">
+        <button type="button" onclick="saveVisitEntry()">Save Visit Entry</button>
+      </div>
+    </div>
+    <!-- VISIT TAB END -->
+
+    <div id="msg" class="msg"></div>
+  </div>
+
+  <script>
+    const API = window.location.origin;
+
+    async function readApiResponse(res) {
+      const contentType = res.headers.get("content-type") || "";
+
+      if (contentType.includes("application/json")) {
+        return await res.json();
+      }
+
+      const text = await res.text();
+      return { detail: text || "Unknown server response" };
+    }
+
+    async function clearDatabase() {
+      try {
+        const password = document.getElementById("clear_db_password").value.trim();
+
+        if (!password) {
+          showMessage("Please enter clear database password.", false);
+          return;
+        }
+
+        const res = await fetch(`${API}/admin/clear-database`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ password }),
+        });
+
+        const result = await res.json();
+
+        if (!res.ok) {
+          throw new Error(result.detail || "Failed to clear database");
+        }
+
+        document.getElementById("clear_db_password").value = "";
+        await loadOptions();
+        showMessage("Database cleared successfully.");
+      } catch (err) {
+        showMessage(err.message || "Failed to clear database", false);
+      }
+    }
+
+    function showMessage(text, ok = true) {
+      const box = document.getElementById("msg");
+      box.textContent = text;
+      box.className = ok ? "msg ok" : "msg err";
+    }
+
+    function fillSelect(selectId, values, placeholder) {
+      const select = document.getElementById(selectId);
+      if (!select) return;
+
+      select.innerHTML = "";
+      const first = document.createElement("option");
+      first.value = "";
+      first.textContent = placeholder;
+      select.appendChild(first);
+
+      values.forEach((value) => {
+        const opt = document.createElement("option");
+        opt.value = value;
+        opt.textContent = value;
+        select.appendChild(opt);
+      });
+    }
+
+    function pickValue(selectId, newInputId) {
+      const selected = document.getElementById(selectId)?.value?.trim();
+      const typed = document.getElementById(newInputId)?.value?.trim();
+      return typed || selected || "";
+    }
+
+    function showTab(tabName) {
+      const salesTab = document.getElementById("sales-tab");
+      const visitTab = document.getElementById("visit-tab");
+      const salesBtn = document.getElementById("tab-sales-btn");
+      const visitBtn = document.getElementById("tab-visit-btn");
+
+      if (tabName === "sales") {
+        salesTab.classList.add("active");
+        visitTab.classList.remove("active");
+        salesBtn.classList.add("active");
+        visitBtn.classList.remove("active");
+      } else {
+        visitTab.classList.add("active");
+        salesTab.classList.remove("active");
+        visitBtn.classList.add("active");
+        salesBtn.classList.remove("active");
+      }
+    }
+
+    async function loadOptions(team = "") {
+      const url = team
+        ? `${API}/form/options?team=${encodeURIComponent(team)}`
+        : `${API}/form/options`;
+
+      const res = await fetch(url);
+      const data = await readApiResponse(res);
+
+      fillSelect("team_manage_old", data.teams || [], "Select team");
+      fillSelect("team_select", data.teams || [], "Select team");
+      fillSelect("upload_team_select", data.teams || [], "Select team");
+      fillSelect("sales_person_select", data.sales_people || [], "Select sales person");
+      fillSelect("client_select", data.clients || [], "Select client");
+      fillSelect("product_select", data.products || [], "Select product");
+
+      const hasTeam = !!team;
+
+      document.getElementById("sales_person_select").disabled = !hasTeam;
+      document.getElementById("client_select").disabled = !hasTeam;
+      document.getElementById("product_select").disabled = !hasTeam;
+      
+      if (team) {
+        document.getElementById("team_select").value = team;
+      }
+    }
+
+    async function handleEntryTeamChange() {
+      const team = document.getElementById("team_select").value.trim();
+
+      document.getElementById("sales_person_select").value = "";
+      document.getElementById("client_select").value = "";
+      document.getElementById("product_select").value = "";
+
+      if (!team) {
+        await loadOptions("");
+        showMessage("Please first select team.", false);
+        return;
+      }
+
+      await loadOptions(team);
+
+      const box = document.getElementById("msg");
+      box.textContent = "";
+      box.className = "msg";
+    }
+
+    async function addTeam() {
+      try {
+        const name = document.getElementById("team_manage_new").value.trim();
+        if (!name) return showMessage("Enter team name first.", false);
+
+        const res = await fetch(`${API}/form/team`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ name })
+        });
+
+        const result = await readApiResponse(res);
+        if (!res.ok) throw new Error(result.detail || "Failed to add team");
+
+        await loadOptions();
+        showMessage("Team added successfully.");
+      } catch (err) {
+        showMessage(err.message || "Failed to add team", false);
+      }
+    }
+
+    async function renameTeam() {
+      try {
+        const old_name = document.getElementById("team_manage_old").value;
+        const new_name = document.getElementById("team_manage_new").value.trim();
+
+        if (!old_name || !new_name) {
+          return showMessage("Select existing team and enter new name.", false);
+        }
+
+        const res = await fetch(`${API}/form/team/rename`, {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ old_name, new_name })
+        });
+
+        const result = await readApiResponse(res);
+        if (!res.ok) throw new Error(result.detail || "Failed to rename team");
+
+        await loadOptions();
+        showMessage("Team renamed successfully.");
+      } catch (err) {
+        showMessage(err.message || "Failed to rename team", false);
+      }
+    }
+
+    async function saveEntry() {
+      try {
+        const payload = {
+          team: pickValue("team_select", "team_new"),
+          sales_person: pickValue("sales_person_select", "sales_person_new"),
+          client_name: pickValue("client_select", "client_new"),
+          product: pickValue("product_select", "product_new"),
+          entry_date: document.getElementById("entry_date").value,
+          quantity: Number(document.getElementById("quantity").value),
+        };
+
+        if (!payload.team || !payload.sales_person || !payload.client_name || !payload.product || !payload.entry_date) {
+          return showMessage("Please fill all required fields.", false);
+        }
+
+        const res = await fetch(`${API}/data/entry`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const result = await readApiResponse(res);
+        if (!res.ok) throw new Error(result.detail || "Save failed");
+
+        await loadOptions();
+
+        showMessage("Entry saved successfully.");
+
+        document.getElementById("team_select").value = "";
+        document.getElementById("team_new").value = "";
+        document.getElementById("sales_person_select").value = "";
+        document.getElementById("sales_person_new").value = "";
+        document.getElementById("client_select").value = "";
+        document.getElementById("client_new").value = "";
+        document.getElementById("product_select").value = "";
+        document.getElementById("product_new").value = "";
+        document.getElementById("entry_date").value = "";
+        document.getElementById("quantity").value = "";        
+      } catch (err) {
+        showMessage(err.message || "Save failed", false);
+      }
+    }
+
+    async function saveVisitEntry() {
+      try {
+        const payload = {
+          team: pickValue("visit_team_select", "visit_team_new"),
+          sales_person: pickValue("visit_sales_person_select", "visit_sales_person_new"),
+          client_name: pickValue("visit_client_select", "visit_client_new"),
+          product: pickValue("visit_product_select", "visit_product_new"),
+          meeting_date: document.getElementById("visit_date").value,
+          meeting_time: document.getElementById("visit_time").value,
+          meeting_type: document.getElementById("meeting_type").value,
+          meeting_status: document.getElementById("meeting_status").value,
+          client_response: document.getElementById("client_response").value.trim(),
+          order_amount: Number(document.getElementById("order_amount").value || 0),
+          future_potential: Number(document.getElementById("future_potential").value || 0),
+          next_meeting_date: document.getElementById("next_meeting_date").value,
+          next_meeting_time: document.getElementById("next_meeting_time").value,
+          notes: document.getElementById("visit_notes").value.trim(),
+        };
+
+        if (
+          !payload.team ||
+          !payload.sales_person ||
+          !payload.client_name ||
+          !payload.product ||
+          !payload.meeting_date ||
+          !payload.meeting_time ||
+          !payload.meeting_type ||
+          !payload.meeting_status
+        ) {
+          return showMessage("Please fill all required visit fields.", false);
+        }
+
+        const res = await fetch(`${API}/api/visit-entry`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const result = await readApiResponse(res);
+        if (!res.ok) throw new Error(result.detail || "Visit save failed");
+
+        showMessage("Visit entry saved successfully.");
+      } catch (err) {
+        showMessage(err.message || "Visit save failed", false);
+      }
+    }
+
+    function uploadExcel() {
+      const box = document.getElementById("msg");
+      box.textContent = "";
+      box.className = "msg";
+      
+      try {
+        showMessage("Upload started...", true);
+
+        const teamFromSelect = document.getElementById("upload_team_select").value.trim();
+        const teamFromInput = document.getElementById("upload_team_new").value.trim();
+        const team = teamFromInput || teamFromSelect;
+        if (!team) {
+          showMessage("Please first select team.", false);
+          return;
+        }
+        const fileInput = document.getElementById("excel_file");
+        const file = fileInput.files[0];
+        const mode = document.getElementById("upload_mode").value;
+
+        if (!team) {
+          showMessage("Please select or enter a team name for Excel upload.", false);
+          return;
+        }
+
+        if (!file) {
+          showMessage("Please choose an Excel file.", false);
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open(
+          "POST",
+          `${API}/data/upload?team=${encodeURIComponent(team)}&mode=${encodeURIComponent(mode)}`,
+          true
+        );
+
+        xhr.onload = async function () {
+          let result = {};
+          try {
+            result = JSON.parse(xhr.responseText || "{}");
+          } catch {
+            result = { detail: xhr.responseText || "Upload failed" };
+          }
+
+          if (xhr.status >= 200 && xhr.status < 300) {            
+            showMessage(
+              `Excel uploaded successfully (${result.mode}) in ${mode.toUpperCase()} mode. Inserted rows: ${result.inserted_rows}`
+            );
+
+            // reset upload form
+            document.getElementById("upload_team_select").value = "";
+            document.getElementById("upload_team_new").value = "";
+            document.getElementById("excel_file").value = "";
+            
+            await loadOptions("");
+            
+          } else {
+            showMessage(result.detail || "Upload failed", false);
+          }
+        };
+
+        xhr.onerror = function () {
+          showMessage("Upload request failed before reaching server.", false);
+        };
+
+        xhr.send(formData);
+      } catch (err) {
+        showMessage(err.message || "Upload failed", false);
+      }
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    const entryDateInput = document.getElementById("entry_date");
+    const visitDateInput = document.getElementById("visit_date");
+
+    if (entryDateInput) entryDateInput.value = today;
+    if (visitDateInput) visitDateInput.value = today;
+
+    loadOptions();
+  </script>
+</body>
+</html>
