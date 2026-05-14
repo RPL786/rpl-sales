@@ -2335,6 +2335,15 @@ const productSelectionLabel =
                 Clear Database
               </button>
 
+              <button
+                onClick={() => {
+                  window.open(`${API_BASE_URL}/admin/download-backup`, "_blank");
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
+              >
+                Download Backup
+              </button>
+
               <button className="action-btn primary-btn" onClick={exportPdf}>
                 <Download size={16} />
                 Executive PDF
