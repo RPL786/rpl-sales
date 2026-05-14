@@ -2009,7 +2009,7 @@ def add_client(payload: NameRequest, user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO sales_people (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (name,))
+        cur.execute("INSERT INTO clients (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (name,))
         conn.commit()
         return {"status": "ok", "message": "Client added", "name": name}
     finally:
