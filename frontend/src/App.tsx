@@ -823,7 +823,7 @@ if (!authUser) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
         },
-        body: JSON.stringify({}),        
+        body: JSON.stringify({ password: "chai123" }),        
       });
 
       alert("Database successfully cleared");
