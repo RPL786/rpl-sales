@@ -18,7 +18,7 @@ import pandas as pd
 from sales_auditor import get_boss_audit
 from fastapi import FastAPI, File, HTTPException, UploadFile, Header, Depends
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -3155,11 +3155,37 @@ def admin_update_user_target(user_id: int, payload: UserTargetUpdateRequest, use
         cur.close()
         conn.close()
 
+@app.get("/admin/download-backup")
+def download_backup(user: dict = Depends(require_admin)):
+
+    conn = get_db_connection()
+
+    try:
+        df = pd.read_sql_query("""
+            SELECT *
+            FROM sales_entries
+            ORDER BY entry_date DESC
+        """, conn)
+
+        backup_path = DATA_DIR / "sales_backup.xlsx"
+
+        with pd.ExcelWriter(backup_path, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="sales_entries")
+
+        return FileResponse(
+            path=backup_path,
+            filename="sales_backup.xlsx",
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    finally:
+        conn.close()
+
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_react_app(full_path: str):
     if full_path.startswith(("dashboard", "upload", "reset", "salesperson-insights", "api", "data-entry", "form", "data", "forecast", "admin")):
         raise HTTPException(status_code=404, detail="API route not found")
-    return FileResponse(FRONTEND_DIST / "index.html")    
+    return FileResponse(FRONTEND_DIST / "index.html")
 
 if __name__ == "__main__":
     print("Starting Sales Dashboard Server...")
