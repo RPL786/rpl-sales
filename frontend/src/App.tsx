@@ -807,6 +807,33 @@ if (!authUser) {
     }
   };
 
+  const handleClearDatabase = async () => {
+    const confirmed = window.confirm(
+      "WARNING: Ye database ka sara saved data delete kar dega. Continue?"
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setLoading(true);
+
+      await fetchJson(`${API_BASE_URL}/admin/clear-database`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+        },
+      });
+
+      alert("Database successfully cleared");
+
+      window.location.reload();
+    } catch (err: any) {
+      alert(err.message || "Database clear failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     setLoading(false);
     loadDashboard();
@@ -2292,6 +2319,14 @@ const productSelectionLabel =
 
               <button className="action-btn" onClick={handleClearDashboard}>
                 Clear File
+              </button>
+
+              <button
+                className="action-btn"
+                onClick={handleClearDatabase}
+                style={{ background: "#dc2626", color: "white" }}
+              >
+                Clear Database
               </button>
 
               <button className="action-btn primary-btn" onClick={exportPdf}>
