@@ -2339,7 +2339,7 @@ const productSelectionLabel =
                 onClick={() => {
                   window.open(`${API_BASE_URL}/admin/download-backup`, "_blank");
                 }}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-medium shadow-lg hover:scale-105 transition-all duration-200"
+                className="action-btn primary-btn"
               >
                 Download Backup
               </button>
