@@ -2428,6 +2428,7 @@ def add_entry(entry: dict, user: dict = Depends(get_current_user)):
         team = str(user.get("team", "")).strip()
         sales_person = str(user.get("username", "")).strip()
     client_name = str(entry.get("client_name", "")).strip()
+    client_category = str(entry.get("client_category", "")).strip()
     product = str(entry.get("product", "")).strip()
     entry_date = str(entry.get("entry_date", "")).strip()
     quantity = entry.get("quantity")
@@ -2464,6 +2465,7 @@ def add_entry(entry: dict, user: dict = Depends(get_current_user)):
             sales_person,
             client_name,
             product,
+            client_category,
             year,
             month,
             quantity,
