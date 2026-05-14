@@ -2762,22 +2762,28 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
     )
 
 @app.post("/admin/clear-database")
-def clear_database(payload: dict):
-    password = str(payload.get("password", "")).strip()
+def clear_database(user: dict = Depends(get_current_user)):
 
-    if password != ADMIN_CLEAR_PASSWORD:
-        raise HTTPException(status_code=403, detail="Invalid password")
+    if user.get("role") not in ["admin", "super_user"]:
+        raise HTTPException(status_code=403, detail="Admin access required")
 
     conn = get_db_connection()
     cur = conn.cursor()
+
     try:
         cur.execute("DELETE FROM sales_entries")
         cur.execute("DELETE FROM teams")
         cur.execute("DELETE FROM sales_people")
         cur.execute("DELETE FROM clients")
         cur.execute("DELETE FROM products")
+
         conn.commit()
-        return {"status": "success", "message": "Database cleared successfully"}
+
+        return {
+            "status": "success",
+            "message": "Database cleared successfully"
+        }
+
     finally:
         conn.close()
 
