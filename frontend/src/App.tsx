@@ -820,8 +820,10 @@ if (!authUser) {
       await fetchJson(`${API_BASE_URL}/admin/clear-database`, {
         method: "POST",
         headers: {
+          "Content-Type": "application/json",
           Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
         },
+        body: JSON.stringify({}),        
       });
 
       alert("Database successfully cleared");
