@@ -739,8 +739,13 @@ if (!authUser) {
       const formData = new FormData();
       formData.append("file", selectedFile);
 
+      const replaceData = window.confirm(
+        "OK = Replace Existing Team Data\nCancel = Append New Data"
+      );
+
+      const uploadMode = replaceData ? "replace" : "append";      
       const result = await fetchJson(
-        `${API_BASE_URL}/data/upload?team=${encodeURIComponent(selectedTeam)}&mode=append`,
+        `${API_BASE_URL}/data/upload?team=${encodeURIComponent(selectedTeam)}&mode=${uploadMode}`,
         {
           method: "POST",
           body: formData,
