@@ -2336,10 +2336,37 @@ const productSelectionLabel =
               </button>
 
               <button
-                onClick={() => {
-                  window.open(`${API_BASE_URL}/admin/download-backup`, "_blank");
-                }}
                 className="action-btn primary-btn"
+                onClick={async () => {
+                  try {
+                    const response = await fetch(
+                      `${API_BASE_URL}/admin/download-backup`,
+                      {
+                        headers: {
+                          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+                        },
+                      }
+                    );
+
+                    if (!response.ok) {
+                      throw new Error("Download failed");
+                    }
+
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "sales_backup.xlsx";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+
+                    window.URL.revokeObjectURL(url);
+                  } catch (err: any) {
+                    alert(err.message || "Backup download failed");
+                  }
+                }}
               >
                 Download Backup
               </button>
