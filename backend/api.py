@@ -2350,10 +2350,17 @@ def get_form_options(team: str = ""):
         ]
 
         cur.execute("""
-            SELECT DISTINCT client_name
-            FROM sales_entries
-            WHERE team = %s
-            ORDER BY client_name
+            SELECT name FROM (
+                SELECT DISTINCT client_name AS name
+                FROM sales_entries
+                WHERE team = %s
+
+                UNION
+
+                SELECT name
+                FROM clients
+            ) x
+            ORDER BY name
         """, (team,))
         clients = [
             row[0] for row in cur.fetchall()
