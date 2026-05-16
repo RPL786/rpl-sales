@@ -207,7 +207,9 @@ export default function VisitForm() {
   };
 
   const validateForm = () => {
-    if (!form.team || !form.client_name || !form.product) {
+    const activeTeam = canSelectTeamAndSalesPerson ? form.team : authUser?.team || "";
+
+    if (!activeTeam || !form.client_name || !form.product) {
       return "Team, client, and product are required.";
     }
 
