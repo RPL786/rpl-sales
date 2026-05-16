@@ -2942,9 +2942,10 @@ def list_visit_entries(user: dict = Depends(get_current_user)):
         else:
             cur.execute("""
                 SELECT * FROM visit_entries
-                WHERE created_by = %s
+                WHERE (created_by = %s OR sales_person = %s)
+                  AND team = %s
                 ORDER BY meeting_date DESC, meeting_time DESC, id DESC
-            """, (user.get("username"),))
+            """, (user.get("username"), user.get("username"), user.get("team", "")))
 
         cols = [d[0] for d in cur.description]
         return {"visits": [dict(zip(cols, row)) for row in cur.fetchall()]}
