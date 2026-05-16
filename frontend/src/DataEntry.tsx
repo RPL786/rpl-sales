@@ -41,7 +41,7 @@ export default function DataEntry() {
     team: "",
     sales_person: "",
     client_name: "",
-    client_category: "",
+    : "",
     entry_date: "",
   });
 
@@ -372,6 +372,14 @@ export default function DataEntry() {
           <option value="Applicator">Applicator</option>
           <option value="Home / Project Owner">Home / Project Owner</option>          
         </select>
+
+        <input
+          className="filter-select"
+          name="entry_date"
+          type="date"
+          value={form.entry_date}
+          onChange={handleChange}
+        />
 
         <div>
           {items.map((item, index) => (
