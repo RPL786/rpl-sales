@@ -41,7 +41,7 @@ export default function DataEntry() {
     team: "",
     sales_person: "",
     client_name: "",
-    : "",
+    client_category: "",
     entry_date: "",
   });
 
