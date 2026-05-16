@@ -90,6 +90,16 @@ export default function VisitForm() {
   const canSelectTeamAndSalesPerson =
     authUser?.role === "admin" || authUser?.role === "super_user";
     const [form, setForm] = useState<VisitFormState>(emptyForm);
+
+    useEffect(() => {
+      if (!canSelectTeamAndSalesPerson) {
+        setForm((prev) => ({
+          ...prev,
+          team: authUser?.team || "",
+          sales_person: authUser?.username || "",
+        }));
+      }
+    }, []);
   const [visits, setVisits] = useState<VisitEntry[]>([]);
   const [message, setMessage] = useState("");
   const [editingVisitId, setEditingVisitId] = useState<number | null>(null);
