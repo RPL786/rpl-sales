@@ -207,9 +207,18 @@ export default function VisitForm() {
   };
 
   const validateForm = () => {
-    const activeTeam = canSelectTeamAndSalesPerson ? form.team : authUser?.team || "";
+    const activeTeam = canSelectTeamAndSalesPerson
+      ? form.team?.trim()
+      : authUser?.team || "";
 
-    if (!activeTeam || !form.client_name || !form.product) {
+    const activeClient = form.client_name?.trim();
+
+    const activeProduct =
+      selectedProducts.length > 0
+        ? selectedProducts.join(", ")
+        : form.product?.trim();
+
+    if (!activeTeam || !activeClient || !activeProduct) {
       return "Team, client, and product are required.";
     }
 
@@ -248,23 +257,18 @@ export default function VisitForm() {
       const res = await fetch(url, {
         method,
         headers: authHeaders(true),
-        body: JSON.stringify({          
+        body: JSON.stringify({
           ...form,
 
-          team: canSelectTeamAndSalesPerson
-            ? form.team
-            : authUser?.team || "",
+          team: canSelectTeamAndSalesPerson ? form.team : authUser?.team || "",
+          sales_person: canSelectTeamAndSalesPerson ? form.sales_person : authUser?.username || "",
+          product: selectedProducts.length > 0 ? selectedProducts.join(", ") : form.product,
 
-          sales_person: canSelectTeamAndSalesPerson
-            ? form.sales_person
-            : authUser?.username || "",
-          
           client_category: form.client_category,
           order_amount: Number(form.order_amount || 0),
           quantity: Number(form.quantity || 0),
           future_potential: Number(form.future_potential || 0),
         }),
-      });
 
       const result = await res.json();
 
