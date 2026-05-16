@@ -249,6 +249,14 @@ export default function VisitForm() {
         method,
         headers: authHeaders(true),
         body: JSON.stringify({
+          team: canSelectTeamAndSalesPerson
+            ? form.team
+            : authUser?.team || "",
+
+          sales_person: canSelectTeamAndSalesPerson
+            ? form.sales_person
+            : authUser?.username || "",
+          
           ...form,
           client_category: form.client_category,
           order_amount: Number(form.order_amount || 0),
