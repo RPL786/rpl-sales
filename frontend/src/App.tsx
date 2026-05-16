@@ -477,7 +477,7 @@ if (!authUser) {
 
   const [activeTab, setActiveTab] = useState(() => {
     const user = JSON.parse(localStorage.getItem("auth_user") || "{}");
-    return user?.role === "admin" ? "admin" : "overview";
+    return user?.role === "admin" ? "admin" : "visit";
   });
 
   useEffect(() => {
