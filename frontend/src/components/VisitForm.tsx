@@ -253,22 +253,32 @@ export default function VisitForm() {
 
     const method = editingVisitId ? "PUT" : "POST";
 
+    const activeTeam = canSelectTeamAndSalesPerson
+      ? form.team
+      : authUser?.team || "";
+
+    const activeSalesPerson = canSelectTeamAndSalesPerson
+      ? form.sales_person
+      : authUser?.username || "";
+
+    const activeProduct =
+      selectedProducts.length > 0 ? selectedProducts.join(", ") : form.product;
+
     try {
       const res = await fetch(url, {
         method,
         headers: authHeaders(true),
         body: JSON.stringify({
           ...form,
-
-          team: canSelectTeamAndSalesPerson ? form.team : authUser?.team || "",
-          sales_person: canSelectTeamAndSalesPerson ? form.sales_person : authUser?.username || "",
-          product: selectedProducts.length > 0 ? selectedProducts.join(", ") : form.product,
-
+          team: activeTeam,
+          sales_person: activeSalesPerson,
+          product: activeProduct,
           client_category: form.client_category,
           order_amount: Number(form.order_amount || 0),
           quantity: Number(form.quantity || 0),
           future_potential: Number(form.future_potential || 0),
         }),
+      });
 
       const result = await res.json();
 
@@ -282,6 +292,7 @@ export default function VisitForm() {
           ? "Visit updated successfully"
           : "Visit entry saved successfully"
       );
+
       resetForm();
       loadVisits();
     } catch {
