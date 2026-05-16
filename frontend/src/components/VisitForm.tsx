@@ -248,7 +248,9 @@ export default function VisitForm() {
       const res = await fetch(url, {
         method,
         headers: authHeaders(true),
-        body: JSON.stringify({
+        body: JSON.stringify({          
+          ...form,
+
           team: canSelectTeamAndSalesPerson
             ? form.team
             : authUser?.team || "",
@@ -257,7 +259,6 @@ export default function VisitForm() {
             ? form.sales_person
             : authUser?.username || "",
           
-          ...form,
           client_category: form.client_category,
           order_amount: Number(form.order_amount || 0),
           quantity: Number(form.quantity || 0),
