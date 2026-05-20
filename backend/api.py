@@ -13,6 +13,7 @@ import sys
 import socket
 import webbrowser
 import uvicorn
+from psycopg2.extras import execute_values
 
 import pandas as pd
 from sales_auditor import get_boss_audit
@@ -2776,11 +2777,16 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
                     if date_rows_to_insert:
                         print("STEP 9D: starting DB insert", flush=True)
                         
-                        cur.executemany("""                        
-                        INSERT INTO sales_entries
-                        (team, sales_person, client_name, client_category, product, year, month, quantity, entry_date)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """, date_rows_to_insert)
+                        execute_values(
+                            cur,
+                            """
+                            INSERT INTO sales_entries
+                            (team, sales_person, client_name, client_category, product, year, month, quantity, entry_date)
+                            VALUES %s
+                            """,
+                            date_rows_to_insert,
+                            page_size=1000
+                        )
 
                         print("STEP 9E: DB insert finished", flush=True)
                         
