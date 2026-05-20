@@ -2719,7 +2719,12 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
                     products = set()
                     date_rows_to_insert = []
 
-                    for _, row in df.iterrows():
+                    print("STEP 9A: starting row conversion, rows =", len(df), flush=True)
+
+                    for idx, row in df.iterrows():
+
+                        if idx % 1000 == 0:
+                            print("STEP 9B: processed rows =", idx, flush=True)
                         sales_person = str(row["Sales Person"]).strip()
                         client_name = str(row["Client Name"]).strip()
                         product = str(row["Product"]).strip()
@@ -2766,12 +2771,19 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
                     for value in products:
                         cur.execute("INSERT INTO products (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (value,))
 
+                    print("STEP 9C: rows ready for DB insert =", len(date_rows_to_insert), flush=True)
+                    
                     if date_rows_to_insert:
-                        cur.executemany("""
+                        print("STEP 9D: starting DB insert", flush=True)
+                        
+                        cur.executemany("""                        
                         INSERT INTO sales_entries
                         (team, sales_person, client_name, client_category, product, year, month, quantity, entry_date)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, date_rows_to_insert)
+
+                        print("STEP 9E: DB insert finished", flush=True)
+                        
                         inserted = len(date_rows_to_insert)
 
                     conn.commit()
