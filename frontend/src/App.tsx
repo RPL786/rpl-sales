@@ -754,7 +754,9 @@ if (!authUser) {
 
       alert(`Uploaded ${result.inserted_rows || 0} rows`);
       setDataSource("database");
-      window.location.reload();
+      alert(`Uploaded ${result.inserted_rows || 0} rows successfully`);
+      setDataSource("database");
+      await loadDashboard();
     } catch (err: any) {
       alert(err.message || "Database upload failed");
     } finally {
