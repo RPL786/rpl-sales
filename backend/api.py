@@ -2542,7 +2542,7 @@ def delete_data_entry(entry_id: int, user: dict = Depends(require_admin)):
 
 @app.post("/data/upload")
 def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "append"):
-    print("UPLOAD ROUTE HIT", team, file.filename if file else "NO_FILE")
+    print("UPLOAD ROUTE HIT", team, file.filename if file else "NO_FILE", flush=True)
     print("STEP 1: route started")
     try:
         team = team.strip()
@@ -2678,14 +2678,38 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
 
                 for sheet_name in workbook.sheet_names:
                     df_sheet = pd.read_excel(workbook, sheet_name=sheet_name, engine="openpyxl")
-                    df_sheet = df_sheet.rename(columns=lambda x: str(x).strip())
-                    df_sheet = df_sheet.dropna(how="all")
-                    df_sheet = df_sheet[list(expected_cols)]
-                    df_sheet = df_sheet.dropna(subset=["Sales Person", "Client Name", "Product", "Date", "Quantity"], how="all")
-                    print("CLEAN DATE ROWS:", sheet_name, len(df_sheet))
 
-                    if expected_cols.issubset(set(df_sheet.columns)):
-                        date_frames.append(df_sheet)
+                    df_sheet = df_sheet.rename(columns=lambda x: str(x).strip())
+
+                    # FIRST CHECK COLUMNS
+                    if not expected_cols.issubset(set(df_sheet.columns)):
+                        print(
+                            "SKIPPING SHEET MISSING DATE COLS:",
+                            sheet_name,
+                            list(df_sheet.columns),
+                            flush=True
+                        )
+                        continue
+
+                    # KEEP ONLY REQUIRED COLUMNS
+                    df_sheet = df_sheet[list(expected_cols)]
+
+                    # REMOVE BLANK ROWS
+                    df_sheet = df_sheet.dropna(how="all")
+
+                    df_sheet = df_sheet.dropna(
+                        subset=["Sales Person", "Client Name", "Product", "Date", "Quantity"],
+                        how="all"
+                    )
+
+                    print(
+                        "CLEAN DATE ROWS:",
+                        sheet_name,
+                        len(df_sheet),
+                        flush=True
+                    )
+
+                    date_frames.append(df_sheet)
 
                 if date_frames:
                     df = pd.concat(date_frames, ignore_index=True)
@@ -2751,7 +2775,7 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
                         inserted = len(date_rows_to_insert)
 
                     conn.commit()
-                    print("STEP 10: date-wise commit done, inserted =", inserted)
+                    print("STEP 10: date-wise commit done, inserted =", inserted, flush=True)
                     return {
                         "status": "uploaded",
                         "mode": "date_excel",
