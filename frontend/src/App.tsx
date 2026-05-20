@@ -751,8 +751,7 @@ if (!authUser) {
           body: formData,
         }
       );
-
-      alert(`Uploaded ${result.inserted_rows || 0} rows`);
+      
       setDataSource("database");
       alert(`Uploaded ${result.inserted_rows || 0} rows successfully`);
       setDataSource("database");
