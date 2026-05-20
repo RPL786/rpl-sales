@@ -750,9 +750,8 @@ if (!authUser) {
           method: "POST",
           body: formData,
         }
-      );
-      
-      setDataSource("database");
+      );      
+     
       alert(`Uploaded ${result.inserted_rows || 0} rows successfully`);
       setDataSource("database");
       await loadDashboard();
