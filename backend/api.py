@@ -2679,6 +2679,10 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
                 for sheet_name in workbook.sheet_names:
                     df_sheet = pd.read_excel(workbook, sheet_name=sheet_name, engine="openpyxl")
                     df_sheet = df_sheet.rename(columns=lambda x: str(x).strip())
+                    df_sheet = df_sheet.dropna(how="all")
+                    df_sheet = df_sheet[list(expected_cols)]
+                    df_sheet = df_sheet.dropna(subset=["Sales Person", "Client Name", "Product", "Date", "Quantity"], how="all")
+                    print("CLEAN DATE ROWS:", sheet_name, len(df_sheet))
 
                     if expected_cols.issubset(set(df_sheet.columns)):
                         date_frames.append(df_sheet)
