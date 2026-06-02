@@ -1494,7 +1494,8 @@ const productSelectionLabel =
                   : "Selected sales person"}
               </p>
             </div>
-          ) : null}        
+          ) : null}
+        </div>
 
         <div className="smart-insights-grid">
           {insightCards.map((item, index) => (
