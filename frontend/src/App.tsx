@@ -1478,19 +1478,23 @@ const productSelectionLabel =
             <p className="metric-sub positive">Leading current mix</p>
           </div>
 
-          {!isSuperUser && (
+          {!isSuperUser ? (
             <div className="card metric-card">
               <p className="metric-title">Top Sales Person</p>
               <h3 className="metric-value metric-value-sm">
                 {selectedSalesPerson === "all"
-                  ? (s.top_sales_person && s.top_sales_person.toLowerCase() !== "nan" ? s.top_sales_person : "N/A")
+                  ? (s.top_sales_person && s.top_sales_person.toLowerCase() !== "nan"
+                      ? s.top_sales_person
+                      : "N/A")
                   : selectedSalesPerson}
               </h3>
               <p className="metric-sub positive">
-                {selectedSalesPerson === "all" ? "Strongest YTD performer" : "Selected sales person"}
+                {selectedSalesPerson === "all"
+                  ? "Strongest YTD performer"
+                  : "Selected sales person"}
               </p>
             </div>
-          )}        
+          ) : null}        
 
         <div className="smart-insights-grid">
           {insightCards.map((item, index) => (
