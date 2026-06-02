@@ -1255,7 +1255,7 @@ const productSelectionLabel =
         tone: worstMonth.growth_percent < 0 ? "negative" : "neutral",
       });
     }
-    if (bestSalesPerson) {
+    if (bestSalesPerson && !isSuperUser) {
       items.push({
         title: `Top Gainer: ${bestSalesPerson.name}`,
         description: `${formatPercent(bestSalesPerson.change_percent)} performance change`,
@@ -1478,18 +1478,20 @@ const productSelectionLabel =
             <p className="metric-sub positive">Leading current mix</p>
           </div>
 
-          <div className="card metric-card">
-            <p className="metric-title">Top Sales Person</p>
-            <h3 className="metric-value metric-value-sm">
-              {selectedSalesPerson === "all"
-                ? (s.top_sales_person && s.top_sales_person.toLowerCase() !== "nan" ? s.top_sales_person : "N/A")
-                : selectedSalesPerson}
-            </h3>
-            <p className="metric-sub positive">
-              {selectedSalesPerson === "all" ? "Strongest YTD performer" : "Selected sales person"}
-            </p>
+          {!isSuperUser && (
+            <div className="card metric-card">
+              <p className="metric-title">Top Sales Person</p>
+              <h3 className="metric-value metric-value-sm">
+                {selectedSalesPerson === "all"
+                  ? (s.top_sales_person && s.top_sales_person.toLowerCase() !== "nan" ? s.top_sales_person : "N/A")
+                  : selectedSalesPerson}
+              </h3>
+              <p className="metric-sub positive">
+                {selectedSalesPerson === "all" ? "Strongest YTD performer" : "Selected sales person"}
+              </p>
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="smart-insights-grid">
           {insightCards.map((item, index) => (
@@ -1600,7 +1602,10 @@ const productSelectionLabel =
               {data.alerts.length === 0 ? (
                 <div className="empty-lite">No alerts available</div>
               ) : (
-                data.alerts.slice(0, 4).map((alert, index) => (
+                data.alerts
+                  .filter((alert) => !isSuperUser || alert.title !== "Sales coaching target")
+                  .slice(0, 4)
+                  .map((alert, index) => (
                   <div key={`${alert.title}-${index}`} className={getAlertClass(alert.severity)}>
                     <div className="row-inline">
                       <Siren size={15} />
