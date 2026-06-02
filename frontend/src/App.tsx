@@ -1597,7 +1597,7 @@ const productSelectionLabel =
               <div>
                 <h2>Alerts / Exception Engine</h2>
                 <p className="section-subtext">
-                  Dashboard khud bataye kidhar attention chahiye
+                  The dashboard should proactively identify and highlight issues that need attention.
                 </p>
               </div>
             </div>
@@ -2272,10 +2272,10 @@ const productSelectionLabel =
               <div className="logo-top-wrap">
                 <img src="/logo.png" alt="Company Logo" className="company-logo-top" />
               </div>
-              <p className="eyebrow">Sales Intelligence</p>
+              <p className="eyebrow">Sales Review Application</p>
               <h1>Executive Dashboard</h1>
               <p className="subtext">
-                Current code ko base bana kar performance, pagination, persistence, metadata, and cleaner tab workflow add kiya gaya hai.
+                The current codebase has been enhanced with improved performance, pagination, data persistence, metadata management, and a more streamlined tab workflow
               </p>
             </div>
             <div className="header-actions">
