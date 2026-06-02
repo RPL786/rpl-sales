@@ -1490,8 +1490,7 @@ const productSelectionLabel =
                 {selectedSalesPerson === "all" ? "Strongest YTD performer" : "Selected sales person"}
               </p>
             </div>
-          </div>
-        )}
+          )}        
 
         <div className="smart-insights-grid">
           {insightCards.map((item, index) => (
