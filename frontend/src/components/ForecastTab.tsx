@@ -11,6 +11,8 @@ export default function ForecastTab() {
   const [data, setData] = useState<ForecastItem[]>([]);
   const [teams, setTeams] = useState<string[]>([]);
   const [selectedTeam, setSelectedTeam] = useState("");
+  const [selectedMonth, setSelectedMonth] = useState("");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   useEffect(() => {
     fetch("/form/options")
@@ -25,11 +27,11 @@ export default function ForecastTab() {
       return;
     }
 
-    fetch(`/forecast?team=${encodeURIComponent(selectedTeam)}`)
+    fetch(`/forecast?team=${encodeURIComponent(selectedTeam)}&month=${encodeURIComponent(selectedMonth)}`)
       .then((res) => res.json())
       .then((items) => setData(items))
       .catch((err) => console.error("Forecast error:", err));
-  }, [selectedTeam]);
+  }, [selectedTeam, selectedMonth]);
 
   return (
     <div className="forecast-wrapper">
@@ -50,6 +52,20 @@ export default function ForecastTab() {
               </option>
             ))}
           </select>
+
+          <select
+            className="filter-select"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            style={{ marginTop: 12 }}
+          >
+            <option value="">Full Year</option>
+            {months.map((month) => (
+              <option key={month} value={month}>
+                {month}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
       
@@ -58,17 +74,16 @@ export default function ForecastTab() {
           <thead>
             <tr>
               <th>Sales Person</th>
-              <th>Target</th>
-              <th>Achieved</th>
-              <th>Difference</th>
-              <th>Status</th>
+              <th>Target KGS</th>
+              <th>Achieved KGS</th>
+              <th>%</th>
+              <th>Remaining %</th>
             </tr>
           </thead>
 
           <tbody>
             {data.map((item, index) => {
-              const isGood = item.difference >= 0;
-
+              
               return (
                 <tr key={index}>
                   <td className="user-cell">
@@ -87,26 +102,12 @@ export default function ForecastTab() {
                     {item.achieved.toLocaleString()}
                   </td>
 
-                  <td
-                    className={
-                      isGood ? "positive-value" : "negative-value"
-                    }
-                  >
-                    {item.difference.toLocaleString()}
+                  <td>
+                    {Math.round((item as any).percent || 0)}%
                   </td>
 
                   <td>
-                    <span
-                      className={
-                        isGood
-                          ? "status-badge success"
-                          : "status-badge danger"
-                      }
-                    >
-                      {isGood
-                        ? "Above Target"
-                        : "Below Target"}
-                    </span>
+                    {Math.round((item as any).remaining_percent || 0)}%
                   </td>
                 </tr>
               );
