@@ -3146,8 +3146,9 @@ def update_visit_entry(visit_id: int, payload: VisitEntryRequest, user: dict = D
         conn.close()
 
 @app.get("/forecast")
-def get_forecast(team: str = ""):
+def get_forecast(team: str = "", month: str = ""):
     team = team.strip()
+    month = month.strip()
 
     if not team:
         return []
@@ -3155,40 +3156,48 @@ def get_forecast(team: str = ""):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT
-            u.username,
-            COALESCE(u.sales_target, 0),
-            COALESCE(u.target_duration, 'monthly'),
-            COALESCE(SUM(se.quantity), 0)
-        FROM users u
-        LEFT JOIN sales_entries se
-            ON LOWER(TRIM(se.sales_person)) = LOWER(TRIM(u.username))
-            AND se.year = EXTRACT(YEAR FROM CURRENT_DATE)
-            AND se.team = %s
-        WHERE u.team = %s
-        GROUP BY u.username, u.sales_target, u.target_duration
-        ORDER BY u.username
-    """, (team, team))
+    try:
+        query = """
+            SELECT
+                u.username,
+                COALESCE(u.sales_target, 0),
+                COALESCE(SUM(se.quantity), 0)
+            FROM users u
+            LEFT JOIN sales_entries se
+                ON LOWER(TRIM(se.sales_person)) = LOWER(TRIM(u.username))
+                AND se.year = EXTRACT(YEAR FROM CURRENT_DATE)
+                AND se.team = %s
+                AND (%s = '' OR se.month = %s)
+            WHERE u.team = %s
+            GROUP BY u.username, u.sales_target
+            ORDER BY u.username
+        """
 
-    rows = cur.fetchall()
-    result = []
+        cur.execute(query, (team, month, month, team))
+        rows = cur.fetchall()
 
-    for row in rows:
-        target = float(row[1] or 0)
-        achieved = float(row[3] or 0)
+        result = []
+        for row in rows:
+            target = float(row[1] or 0)
+            achieved = float(row[2] or 0)
+            remaining = max(0, target - achieved)
+            percent = (achieved / target * 100) if target else 0
+            remaining_percent = max(0, 100 - percent)
 
-        result.append({
-            "username": row[0],
-            "sales_target": target,
-            "target_duration": row[2],
-            "achieved": achieved,
-            "difference": achieved - target,
-        })
+            result.append({
+                "username": row[0],
+                "sales_target": target,
+                "achieved": achieved,
+                "percent": percent,
+                "remaining_percent": remaining_percent,
+                "difference": achieved - target,
+            })
 
-    cur.close()
-    conn.close()
-    return result
+        return result
+
+    finally:
+        cur.close()
+        conn.close()
 
 @app.put("/admin/update-user-target/{user_id}")
 def admin_update_user_target(user_id: int, payload: UserTargetUpdateRequest, user: dict = Depends(require_admin)):
