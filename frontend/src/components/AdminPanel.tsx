@@ -19,6 +19,9 @@ export default function AdminPanel() {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [salesTarget, setSalesTarget] = useState("");
   const [targetDuration, setTargetDuration] = useState("monthly");
+  const [targetYear, setTargetYear] = useState(new Date().getFullYear());
+  const [targetMonth, setTargetMonth] = useState("Jan");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const [message, setMessage] = useState("");
   const [teamName, setTeamName] = useState("");
   const [productName, setProductName] = useState("");
@@ -145,17 +148,17 @@ export default function AdminPanel() {
 
   const saveUserTarget = async (u: UserItem) => {
     try {
-      const res = await fetch(
-        `${API_BASE_URL}/admin/update-user-target/${u.id}`,
-        {
-          method: "PUT",
-          headers: authHeaders,
-          body: JSON.stringify({
-            sales_target: u.sales_target || 0,
-            target_duration: u.target_duration || "monthly",
-          }),
-        }
-      );
+      const res = await fetch(`${API_BASE_URL}/admin/monthly-target`, {
+        method: "PUT",
+        headers: authHeaders,
+        body: JSON.stringify({
+          username: u.username,
+          team: userTeam,
+          year: targetYear,
+          month: targetMonth,
+          target_kg: u.sales_target || 0,
+        }),
+      });
 
       const result = await res.json();
 
@@ -164,7 +167,7 @@ export default function AdminPanel() {
         return;
       }
 
-      alert("Target updated successfully");
+      alert(`Target saved for ${targetMonth} ${targetYear}`);
     } catch (err) {
       console.error(err);
     }
@@ -673,6 +676,38 @@ export default function AdminPanel() {
       </button>
 
       <h3>Users List</h3>
+
+      <div
+        className="filter-grid"
+        style={{
+          display: "flex",
+          gap: 12,
+          alignItems: "center",
+          flexWrap: "wrap",
+          marginBottom: 12,
+        }}
+      >
+        <input
+          className="filter-select"
+          type="number"
+          value={targetYear}
+          onChange={(e) => setTargetYear(Number(e.target.value))}
+          style={{ maxWidth: 160 }}
+        />
+
+        <select
+          className="filter-select"
+          value={targetMonth}
+          onChange={(e) => setTargetMonth(e.target.value)}
+          style={{ maxWidth: 160 }}
+        >
+          {months.map((month) => (
+            <option key={month} value={month}>
+              {month}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <div className="table-wrap">
         <table className="data-table">
