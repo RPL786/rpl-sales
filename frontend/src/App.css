@@ -1668,3 +1668,8 @@ button {
     overflow-x: hidden;
   }
 }
+
+.forecast-total-row {
+  background: rgba(99, 102, 241, 0.18);
+  font-weight: 800;
+}
