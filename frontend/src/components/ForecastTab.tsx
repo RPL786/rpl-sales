@@ -33,6 +33,25 @@ export default function ForecastTab() {
       .catch((err) => console.error("Forecast error:", err));
   }, [selectedTeam, selectedMonth]);
 
+  const teamTotal = data.reduce(
+    (acc, item) => {
+      acc.target += item.sales_target || 0;
+      acc.achieved += item.achieved || 0;
+      return acc;
+    },
+    { target: 0, achieved: 0 }
+  );
+
+  const teamPercent =
+    teamTotal.target > 0
+      ? (teamTotal.achieved / teamTotal.target) * 100
+      : 0;
+
+  const teamRemainingPercent = Math.max(
+    0,
+    100 - teamPercent
+  );
+  
   return (
     <div className="forecast-wrapper">
       <div className="forecast-header">
@@ -112,6 +131,29 @@ export default function ForecastTab() {
                 </tr>
               );
             })}
+            {data.length > 0 && (
+              <tr className="forecast-total-row">
+                <td>
+                  <strong>Team Total</strong>
+                </td>
+
+                <td>
+                  <strong>{teamTotal.target.toLocaleString()}</strong>
+                </td>
+
+                <td className="achieved">
+                  <strong>{teamTotal.achieved.toLocaleString()}</strong>
+                </td>
+
+                <td>
+                  <strong>{Math.round(teamPercent)}%</strong>
+                </td>
+
+                <td>
+                  <strong>{Math.round(teamRemainingPercent)}%</strong>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
