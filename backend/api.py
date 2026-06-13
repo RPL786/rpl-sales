@@ -535,6 +535,19 @@ def ensure_database_schema():
     """)
 
     cur.execute("""
+    CREATE TABLE IF NOT EXISTS sales_targets (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER,
+        username TEXT NOT NULL,
+        team TEXT NOT NULL,
+        target_year INTEGER NOT NULL,
+        target_month TEXT NOT NULL,
+        target_kg REAL DEFAULT 0,
+        UNIQUE(username, team, target_year, target_month)
+    )
+    """)
+
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS sales_entries (
         id SERIAL PRIMARY KEY,
         team TEXT NOT NULL,
@@ -1917,6 +1930,12 @@ class UserTargetUpdateRequest(BaseModel):
     sales_target: float = 0
     target_duration: str = "monthly"
 
+class MonthlyTargetRequest(BaseModel):
+    username: str
+    team: str
+    year: int
+    month: str
+    target_kg: float = 0
 
 @app.get("/api/teams")
 def list_teams(user: dict = Depends(get_current_user)):
@@ -3146,41 +3165,47 @@ def update_visit_entry(visit_id: int, payload: VisitEntryRequest, user: dict = D
         conn.close()
 
 @app.get("/forecast")
-def get_forecast(team: str = "", month: str = ""):
+def get_forecast(team: str = "", month: str = "", year: int = 0):
     team = team.strip()
-    month = month.strip()
+    month = month.strip()[:3].title()
 
     if not team:
         return []
+
+    if not year:
+        year = datetime.now().year
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
-        query = """
+        cur.execute("""
             SELECT
                 u.username,
-                COALESCE(u.sales_target, 0),
-                COALESCE(SUM(se.quantity), 0)
+                COALESCE(st.target_kg, 0) AS sales_target,
+                COALESCE(SUM(se.quantity), 0) AS achieved
             FROM users u
+            LEFT JOIN sales_targets st
+                ON st.username = u.username
+                AND st.team = u.team
+                AND st.target_year = %s
+                AND (%s = '' OR st.target_month = %s)
             LEFT JOIN sales_entries se
                 ON LOWER(TRIM(se.sales_person)) = LOWER(TRIM(u.username))
-                AND se.year = EXTRACT(YEAR FROM CURRENT_DATE)
                 AND se.team = %s
+                AND se.year = %s
                 AND (%s = '' OR se.month = %s)
             WHERE u.team = %s
-            GROUP BY u.username, u.sales_target
+            GROUP BY u.username, st.target_kg
             ORDER BY u.username
-        """
+        """, (year, month, month, team, year, month, month, team))
 
-        cur.execute(query, (team, month, month, team))
         rows = cur.fetchall()
-
         result = []
+
         for row in rows:
             target = float(row[1] or 0)
             achieved = float(row[2] or 0)
-            remaining = max(0, target - achieved)
             percent = (achieved / target * 100) if target else 0
             remaining_percent = max(0, 100 - percent)
 
@@ -3188,9 +3213,9 @@ def get_forecast(team: str = "", month: str = ""):
                 "username": row[0],
                 "sales_target": target,
                 "achieved": achieved,
+                "difference": achieved - target,
                 "percent": percent,
                 "remaining_percent": remaining_percent,
-                "difference": achieved - target,
             })
 
         return result
@@ -3214,6 +3239,45 @@ def admin_update_user_target(user_id: int, payload: UserTargetUpdateRequest, use
         )
         conn.commit()
         return {"status": "success", "message": "Target updated successfully"}
+    finally:
+        cur.close()
+        conn.close()
+
+@app.put("/admin/monthly-target")
+def save_monthly_target(payload: MonthlyTargetRequest, user: dict = Depends(require_admin)):
+    username = payload.username.strip()
+    team = payload.team.strip()
+    month = payload.month.strip()[:3].title()
+
+    if not username or not team or not month or not payload.year:
+        raise HTTPException(status_code=400, detail="username, team, year, month required")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("SELECT id FROM users WHERE username = %s", (username,))
+        row = cur.fetchone()
+        user_id = row[0] if row else None
+
+        cur.execute("""
+            INSERT INTO sales_targets
+            (user_id, username, team, target_year, target_month, target_kg)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (username, team, target_year, target_month)
+            DO UPDATE SET target_kg = EXCLUDED.target_kg
+        """, (
+            user_id,
+            username,
+            team,
+            int(payload.year),
+            month,
+            float(payload.target_kg or 0),
+        ))
+
+        conn.commit()
+        return {"status": "success", "message": "Monthly target saved"}
+
     finally:
         cur.close()
         conn.close()
