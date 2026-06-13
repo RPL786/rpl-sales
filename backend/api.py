@@ -1868,7 +1868,7 @@ def admin_list_users(user: dict = Depends(require_admin)):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, username, role, sales_target, target_duration FROM users ORDER BY id DESC")
+        cur.execute("SELECT id, username, role, team, sales_target, target_duration FROM users ORDER BY id DESC")
         rows = cur.fetchall()
         return {
             "users": [
@@ -1876,8 +1876,9 @@ def admin_list_users(user: dict = Depends(require_admin)):
                     "id": row[0],
                     "username": row[1],
                     "role": row[2],
-                    "sales_target": row[3] or 0,
-                    "target_duration": row[4] or "monthly",
+                    "team": row[3] or "",
+                    "sales_target": row[4] or 0,
+                    "target_duration": row[5] or "monthly",
                 }
                 for row in rows
             ]
