@@ -612,6 +612,11 @@ def ensure_database_schema():
     conn.commit()
     conn.close()
 
+@app.on_event("startup")
+def startup_create_schema():
+    print("RUNNING DB SCHEMA CHECK...")
+    ensure_database_schema()
+    
 
 def load_database_data(team: str):
     try:
