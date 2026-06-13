@@ -6,6 +6,7 @@ type UserItem = {
   id: number;
   username: string;
   role: string;
+  team: string;
   sales_target: number;
   target_duration: string;
 };
@@ -153,7 +154,7 @@ export default function AdminPanel() {
         headers: authHeaders,
         body: JSON.stringify({
           username: u.username,
-          team: userTeam,
+          team: u.team || userTeam,
           year: targetYear,
           month: targetMonth,
           target_kg: u.sales_target || 0,
