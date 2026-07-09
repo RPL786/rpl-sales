@@ -89,7 +89,7 @@ export default function VisitForm() {
   const [team, setTeam] = useState(canSelectTeamAndSalesPerson ? "" : authUser?.team || "");
   const [salesPerson, setSalesPerson] = useState(canSelectTeamAndSalesPerson ? "" : authUser?.username || "");
   const [meetingDate, setMeetingDate] = useState(todayDate());
-  const [rows, setRows] = useState<VisitRow[]>(Array.from({ length: 5 }, () => emptyRow()));
+  const [rows, setRows] = useState<VisitRow[]>(Array.from({ length: 5 }, () => ({ ...emptyRow })));
   const [openProductRow, setOpenProductRow] = useState<number | null>(null);
 
   const [visits, setVisits] = useState<VisitEntry[]>([]);
