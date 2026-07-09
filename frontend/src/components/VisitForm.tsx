@@ -573,7 +573,16 @@ export default function VisitForm() {
                   </select>
                 </td>
                 <td>
-                  <input className="filter-select" type="number" value={row.quantity} onChange={(e) => updateRow(index, "quantity", e.target.value)} />
+                  <input
+                    className="filter-select qty-input"
+                    type="number"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    min="0"
+                    value={row.quantity}
+                    onWheel={(e) => e.currentTarget.blur()}
+                    onChange={(e) => updateRow(index, "quantity", e.target.value)}
+                  />
                 </td>
                 <td>
                   <input className="filter-select" type="date" value={row.next_meeting_date} onChange={(e) => updateRow(index, "next_meeting_date", e.target.value)} />
