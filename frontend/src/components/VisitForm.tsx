@@ -89,7 +89,8 @@ export default function VisitForm() {
   const [team, setTeam] = useState(canSelectTeamAndSalesPerson ? "" : authUser?.team || "");
   const [salesPerson, setSalesPerson] = useState(canSelectTeamAndSalesPerson ? "" : authUser?.username || "");
   const [meetingDate, setMeetingDate] = useState(todayDate());
-  const [rows, setRows] = useState<VisitRow[]>(Array.from({ length: 5 }, () => ({ ...emptyRow })));
+  const [rows, setRows] = useState<VisitRow[]>(Array.from({ length: 5 }, () => emptyRow()));
+  const [openProductRow, setOpenProductRow] = useState<number | null>(null);
 
   const [visits, setVisits] = useState<VisitEntry[]>([]);
   const [message, setMessage] = useState("");
@@ -473,57 +474,80 @@ export default function VisitForm() {
                   </select>
                 </td>
                 <td>
-                  <div
-                    style={{
-                      minWidth: 220,
-                      maxHeight: 140,
-                      overflowY: "auto",
-                      border: "1px solid #d1d5db",
-                      borderRadius: 10,
-                      padding: 8,
-                      background: "#fff",
-                    }}
-                  >
-                    {products.length === 0 ? (
-                      <div style={{ fontSize: 12, color: "#6b7280" }}>No products</div>
-                    ) : (
-                      products.map((product) => {
-                        const selectedProducts = row.product
-                          .split(",")
-                          .map((p) => p.trim())
-                          .filter(Boolean);
+                  <div style={{ position: "relative", minWidth: 220 }}>
+                    <button
+                      type="button"
+                      className="filter-select"
+                      onClick={() =>
+                        setOpenProductRow(openProductRow === index ? null : index)
+                      }
+                      style={{
+                        width: "100%",
+                        textAlign: "left",
+                        color: row.product ? "#111827" : "#6b7280",
+                        background: "#ffffff",
+                      }}
+                    >
+                      {row.product || "Select products"}
+                    </button>
 
-                        const checked = selectedProducts.includes(product.name);
+                    {openProductRow === index && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "42px",
+                          left: 0,
+                          right: 0,
+                          zIndex: 9999,
+                          maxHeight: 220,
+                          overflowY: "auto",
+                          background: "#ffffff",
+                          border: "1px solid #d1d5db",
+                          borderRadius: 10,
+                          boxShadow: "0 12px 30px rgba(15, 23, 42, 0.18)",
+                          padding: 8,
+                        }}
+                      >
+                        {products.length === 0 ? (
+                          <div style={{ fontSize: 13, color: "#6b7280", padding: 8 }}>
+                            No products found
+                          </div>
+                        ) : (
+                          products.map((product) => {
+                            const selectedProducts = row.product
+                              .split(",")
+                              .map((p) => p.trim())
+                              .filter(Boolean);
 
-                        return (
-                          <label
-                            key={product.id}
-                            style={{
-                              display: "flex",
-                              gap: 8,
-                              alignItems: "center",
-                              fontSize: 13,
-                              marginBottom: 6,
-                              cursor: "pointer",
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleProduct(index, product.name)}
-                            />
-                            {product.name}
-                          </label>
-                        );
-                      })
+                            const checked = selectedProducts.includes(product.name);
+
+                            return (
+                              <label
+                                key={product.id}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  padding: "7px 8px",
+                                  fontSize: 13,
+                                  color: "#111827",
+                                  cursor: "pointer",
+                                  borderRadius: 8,
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleProduct(index, product.name)}
+                                />
+                                <span>{product.name}</span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
                     )}
                   </div>
-
-                  {row.product && (
-                    <div style={{ fontSize: 11, color: "#2563eb", marginTop: 6 }}>
-                      Selected: {row.product}
-                    </div>
-                  )}
                 </td>
                 <td>
                   <input className="filter-select" type="time" value={row.meeting_time} onChange={(e) => updateRow(index, "meeting_time", e.target.value)} />
