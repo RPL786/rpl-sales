@@ -473,18 +473,57 @@ export default function VisitForm() {
                   </select>
                 </td>
                 <td>
-                  <input
-                    className="filter-select"
-                    list={`products-list-${index}`}
-                    placeholder="Product A, Product B"
-                    value={row.product}
-                    onChange={(e) => updateRow(index, "product", e.target.value)}
-                  />
-                  <datalist id={`products-list-${index}`}>
-                    {products.map((product) => (
-                      <option key={product.id} value={product.name} />
-                    ))}
-                  </datalist>
+                  <div
+                    style={{
+                      minWidth: 220,
+                      maxHeight: 140,
+                      overflowY: "auto",
+                      border: "1px solid #d1d5db",
+                      borderRadius: 10,
+                      padding: 8,
+                      background: "#fff",
+                    }}
+                  >
+                    {products.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "#6b7280" }}>No products</div>
+                    ) : (
+                      products.map((product) => {
+                        const selectedProducts = row.product
+                          .split(",")
+                          .map((p) => p.trim())
+                          .filter(Boolean);
+
+                        const checked = selectedProducts.includes(product.name);
+
+                        return (
+                          <label
+                            key={product.id}
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              alignItems: "center",
+                              fontSize: 13,
+                              marginBottom: 6,
+                              cursor: "pointer",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleProduct(index, product.name)}
+                            />
+                            {product.name}
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {row.product && (
+                    <div style={{ fontSize: 11, color: "#2563eb", marginTop: 6 }}>
+                      Selected: {row.product}
+                    </div>
+                  )}
                 </td>
                 <td>
                   <input className="filter-select" type="time" value={row.meeting_time} onChange={(e) => updateRow(index, "meeting_time", e.target.value)} />
