@@ -250,6 +250,8 @@ class VisitEntryRequest(BaseModel):
     next_meeting_time: str = ""
     notes: str = ""
 
+class VisitBulkRequest(BaseModel):
+    visits: List[VisitEntryRequest]
 
 def safe_int(value: Any) -> int:
     if pd.isna(value):
@@ -2998,6 +3000,78 @@ def create_visit_entry(payload: VisitEntryRequest, user: dict = Depends(get_curr
         ))
         conn.commit()
         return {"status": "ok", "message": "Visit saved successfully"}
+    finally:
+        conn.close()
+
+@app.post("/api/visit-entries/bulk")
+def create_visit_entries_bulk(payload: VisitBulkRequest, user: dict = Depends(get_current_user)):
+    if not payload.visits:
+        raise HTTPException(status_code=400, detail="No visits provided")
+
+    rows = []
+
+    for item in payload.visits:
+        row = {
+            "created_by": user.get("username", ""),
+            "created_at": now_iso(),
+            "team": item.team.strip() if user.get("role") == "admin" else user.get("team", ""),
+            "sales_person": item.sales_person.strip() if user.get("role") == "admin" else user.get("username", ""),
+            "client_name": item.client_name.strip(),
+            "client_category": item.client_category.strip(),
+            "product": item.product.strip(),
+            "meeting_date": item.meeting_date,
+            "meeting_time": item.meeting_time,
+            "meeting_type": item.meeting_type.strip(),
+            "meeting_status": item.meeting_status.strip(),
+            "client_response": item.client_response.strip(),
+            "order_amount": item.order_amount,
+            "quantity": item.quantity,
+            "future_potential": item.future_potential,
+            "next_meeting_date": item.next_meeting_date,
+            "next_meeting_time": item.next_meeting_time,
+            "notes": item.notes.strip(),
+        }
+
+        if not row["team"] or not row["sales_person"] or not row["client_name"] or not row["product"]:
+            raise HTTPException(status_code=400, detail="team, sales_person, client_name, product are required")
+
+        if not row["meeting_date"] or not row["meeting_time"] or not row["meeting_type"] or not row["meeting_status"]:
+            raise HTTPException(status_code=400, detail="meeting date/time/type/status are required")
+
+        rows.append(row)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.executemany("""
+            INSERT INTO visit_entries (
+                created_by, created_at, team, sales_person, client_name, client_category, product,
+                meeting_date, meeting_time, meeting_type, meeting_status,
+                client_response, order_amount, quantity, future_potential,
+                next_meeting_date, next_meeting_time, notes
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, [
+            (
+                row["created_by"], row["created_at"], row["team"], row["sales_person"],
+                row["client_name"], row["client_category"], row["product"],
+                row["meeting_date"], row["meeting_time"], row["meeting_type"],
+                row["meeting_status"], row["client_response"], row["order_amount"],
+                row["quantity"], row["future_potential"], row["next_meeting_date"],
+                row["next_meeting_time"], row["notes"]
+            )
+            for row in rows
+        ])
+
+        conn.commit()
+
+        return {
+            "status": "ok",
+            "saved": len(rows),
+            "message": f"{len(rows)} visits saved successfully"
+        }
+
     finally:
         conn.close()
 
