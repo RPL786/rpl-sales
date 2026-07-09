@@ -197,6 +197,30 @@ export default function VisitForm() {
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
   };
 
+  const toggleProduct = (index: number, productName: string) => {
+    setRows((prev) =>
+      prev.map((row, i) => {
+        if (i !== index) return row;
+
+        const selectedProducts = row.product
+          .split(",")
+          .map((p) => p.trim())
+          .filter(Boolean);
+
+        const exists = selectedProducts.includes(productName);
+
+        const updatedProducts = exists
+          ? selectedProducts.filter((p) => p !== productName)
+          : [...selectedProducts, productName];
+
+        return {
+          ...row,
+          product: updatedProducts.join(", "),
+        };
+      })
+    );
+  };
+
   const clearRows = () => {
     setRows(Array.from({ length: 5 }, () => ({ ...emptyRow })));
   };
