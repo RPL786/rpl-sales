@@ -499,8 +499,14 @@ def ensure_database_schema():
     cur.execute("""
     CREATE TABLE IF NOT EXISTS teams (
         id SERIAL PRIMARY KEY,
-        name TEXT UNIQUE NOT NULL
+        name TEXT UNIQUE NOT NULL,
+        target_type TEXT DEFAULT 'QTY'
     )
+    """)
+
+    cur.execute("""
+    ALTER TABLE teams
+    ADD COLUMN IF NOT EXISTS target_type TEXT DEFAULT 'QTY'
     """)
 
     cur.execute("""
@@ -545,8 +551,20 @@ def ensure_database_schema():
         target_year INTEGER NOT NULL,
         target_month TEXT NOT NULL,
         target_kg REAL DEFAULT 0,
+        target_type TEXT DEFAULT 'QTY',
+        target_value REAL DEFAULT 0,
         UNIQUE(username, team, target_year, target_month)
     )
+    """)
+
+    cur.execute("""
+    ALTER TABLE sales_targets
+    ADD COLUMN IF NOT EXISTS target_type TEXT DEFAULT 'QTY'
+    """)
+
+    cur.execute("""
+    ALTER TABLE sales_targets
+    ADD COLUMN IF NOT EXISTS target_value REAL DEFAULT 0
     """)
 
     cur.execute("""
@@ -560,8 +578,14 @@ def ensure_database_schema():
         year INTEGER NOT NULL,
         month TEXT NOT NULL,
         quantity REAL NOT NULL,
+        amount REAL DEFAULT 0,
         entry_date TEXT
     )
+    """)
+
+    cur.execute("""
+    ALTER TABLE sales_entries
+    ADD COLUMN IF NOT EXISTS amount REAL DEFAULT 0
     """)
 
     cur.execute("""
@@ -1944,6 +1968,8 @@ class MonthlyTargetRequest(BaseModel):
     year: int
     month: str
     target_kg: float = 0
+    target_type: str = "QTY"
+    target_value: float = 0
 
 @app.get("/api/teams")
 def list_teams(user: dict = Depends(get_current_user)):
@@ -2467,6 +2493,7 @@ def add_entry(entry: dict, user: dict = Depends(get_current_user)):
     product = str(entry.get("product", "")).strip()
     entry_date = str(entry.get("entry_date", "")).strip()
     quantity = entry.get("quantity")
+    amount = entry.get("amount", 0)
 
     if not team or not sales_person or not client_name or not product or not entry_date:
         raise HTTPException(
@@ -2479,10 +2506,11 @@ def add_entry(entry: dict, user: dict = Depends(get_current_user)):
 
     try:
         quantity = float(quantity)
+        amount = float(amount or 0)
         year = year_from_date(entry_date)
         month = month_from_date(entry_date)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid date or quantity: {str(exc)}") from exc
+        raise HTTPException(status_code=400, detail=f"Invalid date, quantity or amount: {str(exc)}") from exc
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -2493,8 +2521,8 @@ def add_entry(entry: dict, user: dict = Depends(get_current_user)):
         ensure_lookup_value(conn, "products", product)
 
         cur.execute("""
-        INSERT INTO sales_entries (team, sales_person, client_name, client_category, product, year, month, quantity, entry_date)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO sales_entries (team, sales_person, client_name, client_category, product, year, month, quantity, amount, entry_date)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             team,
             sales_person,
@@ -2504,6 +2532,7 @@ def add_entry(entry: dict, user: dict = Depends(get_current_user)):
             year,
             month,
             quantity,
+            amount,
             entry_date,
         ))
 
@@ -3259,11 +3288,18 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
     cur = conn.cursor()
 
     try:
-        cur.execute("""
+        cur.execute("SELECT COALESCE(target_type, 'QTY') FROM teams WHERE name = %s", (team,))
+        team_row = cur.fetchone()
+        team_target_type = (team_row[0] if team_row else "QTY").upper()
+
+        achieved_field = "se.amount" if team_target_type == "AMOUNT" else "se.quantity"
+
+        cur.execute(f"""
             SELECT
                 u.username,
-                COALESCE(st.target_kg, 0) AS sales_target,
-                COALESCE(SUM(se.quantity), 0) AS achieved
+                COALESCE(st.target_type, %s) AS target_type,
+                COALESCE(st.target_value, st.target_kg, 0) AS sales_target,
+                COALESCE(SUM({achieved_field}), 0) AS achieved
             FROM users u
             LEFT JOIN sales_targets st
                 ON st.username = u.username
@@ -3276,24 +3312,29 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
                 AND se.year = %s
                 AND (%s = '' OR se.month = %s)
             WHERE u.team = %s
-            GROUP BY u.username, st.target_kg
+            GROUP BY u.username, st.target_type, st.target_value, st.target_kg
             ORDER BY u.username
-        """, (year, month, month, team, year, month, month, team))
+        """, (team_target_type, year, month, month, team, year, month, month, team))
 
         rows = cur.fetchall()
         result = []
 
         for row in rows:
-            target = float(row[1] or 0)
-            achieved = float(row[2] or 0)
+            target_type = (row[1] or team_target_type).upper()
+            target = float(row[2] or 0)
+            achieved = float(row[3] or 0)
             percent = (achieved / target * 100) if target else 0
+            remaining = target - achieved
             remaining_percent = max(0, 100 - percent)
 
             result.append({
                 "username": row[0],
+                "target_type": target_type,
+                "unit": "Rs" if target_type == "AMOUNT" else "Qty",
                 "sales_target": target,
                 "achieved": achieved,
                 "difference": achieved - target,
+                "remaining": remaining,
                 "percent": percent,
                 "remaining_percent": remaining_percent,
             })
@@ -3303,7 +3344,6 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
     finally:
         cur.close()
         conn.close()
-
 @app.put("/admin/update-user-target/{user_id}")
 def admin_update_user_target(user_id: int, payload: UserTargetUpdateRequest, user: dict = Depends(require_admin)):
     conn = get_db_connection()
@@ -3342,17 +3382,22 @@ def save_monthly_target(payload: MonthlyTargetRequest, user: dict = Depends(requ
 
         cur.execute("""
             INSERT INTO sales_targets
-            (user_id, username, team, target_year, target_month, target_kg)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            (user_id, username, team, target_year, target_month, target_kg, target_type, target_value)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (username, team, target_year, target_month)
-            DO UPDATE SET target_kg = EXCLUDED.target_kg
+            DO UPDATE SET
+                target_kg = EXCLUDED.target_kg,
+                target_type = EXCLUDED.target_type,
+                target_value = EXCLUDED.target_value
         """, (
             user_id,
             username,
             team,
             int(payload.year),
             month,
-            float(payload.target_kg or 0),
+            float(payload.target_kg or payload.target_value or 0),
+            payload.target_type.upper(),
+            float(payload.target_value or payload.target_kg or 0),
         ))
 
         conn.commit()
