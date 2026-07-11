@@ -25,6 +25,7 @@ export default function AdminPanel() {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const [message, setMessage] = useState("");
   const [teamName, setTeamName] = useState("");
+  const [teamTargetType, setTeamTargetType] = useState("QTY");
   const [productName, setProductName] = useState("");
   const [teams, setTeams] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
@@ -198,13 +199,14 @@ export default function AdminPanel() {
     const res = await fetch(`${API_BASE_URL}/api/teams`, {
       method: "POST",
       headers: authHeaders,
-      body: JSON.stringify({ name: teamName }),
+      body: JSON.stringify({ name: teamName, target_type: teamTargetType }),
     });
 
     const result = await res.json();
     setMessage(res.ok ? "Team added ✅" : result.detail || "Team add failed");
     if (res.ok) {
       setTeamName("");
+      setTeamTargetType("QTY");
       loadTeamsProducts();
     }
   };
@@ -409,6 +411,15 @@ export default function AdminPanel() {
           onChange={(e) => setTeamName(e.target.value)}
         />
 
+        <select
+          className="filter-select"
+          value={teamTargetType}
+          onChange={(e) => setTeamTargetType(e.target.value)}
+        >
+          <option value="QTY">QTY Target</option>
+          <option value="AMOUNT">Rupees Target</option>
+        </select>
+
         <button className="action-btn" onClick={addTeam}>
           Add Team
         </button>
@@ -516,6 +527,7 @@ export default function AdminPanel() {
             <tr>
               <th>ID</th>
               <th>Team</th>
+              <th>Target Type</th>
               <th>Action</th>
             </tr>
           </thead>
@@ -524,6 +536,7 @@ export default function AdminPanel() {
               <tr key={team.id}>
                 <td>{team.id}</td>
                 <td>{team.name}</td>
+                <td>{team.target_type || "QTY"}</td>
                 <td>
                   <button className="action-btn" onClick={() => deleteTeam(team.id)}>
                     Delete
