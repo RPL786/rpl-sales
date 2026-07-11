@@ -1957,6 +1957,7 @@ def admin_reset_password(user_id: int, payload: AdminResetPasswordRequest, user:
 
 class NameRequest(BaseModel):
     name: str
+    target_type: str = "QTY"
 
 class UserTargetUpdateRequest(BaseModel):
     sales_target: float = 0
@@ -1976,9 +1977,14 @@ def list_teams(user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, name FROM teams ORDER BY name")
+        cur.execute("SELECT id, name, COALESCE(target_type, 'QTY') FROM teams ORDER BY name")
         rows = cur.fetchall()
-        return {"teams": [{"id": r[0], "name": r[1]} for r in rows]}
+        return {
+            "teams": [
+                {"id": r[0], "name": r[1], "target_type": r[2]}
+                for r in rows
+            ]
+        }
     finally:
         conn.close()
 
@@ -1986,13 +1992,21 @@ def list_teams(user: dict = Depends(get_current_user)):
 @app.post("/api/teams")
 def add_team(payload: NameRequest, user: dict = Depends(require_admin)):
     name = payload.name.strip()
+    target_type = (payload.target_type or "QTY").strip().upper()
+
+    if target_type not in {"QTY", "AMOUNT"}:
+        target_type = "QTY"
+
     if not name:
         raise HTTPException(status_code=400, detail="Team name required")
 
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO teams (name) VALUES (%s)", (name,))
+        cur.execute(
+            "INSERT INTO teams (name, target_type) VALUES (%s, %s)",
+            (name, target_type)
+        )
         conn.commit()
         return {"status": "ok", "message": "Team added"}
     except Exception:
@@ -2560,20 +2574,20 @@ def list_data_entries(user: dict = Depends(get_current_user)):
     try:
         if user.get("role") in {"admin", "super_user"}:
             cur.execute("""
-                SELECT id, team, sales_person, client_name, client_category, product, year, month, quantity, entry_date
+                SELECT id, team, sales_person, client_name, client_category, product, year, month, quantity, amount, entry_date
                 FROM sales_entries
                 ORDER BY entry_date DESC, id DESC
             """)
         elif user.get("role") == "team_leader":
             cur.execute("""
-                SELECT id, team, sales_person, client_name, client_category, product, year, month, quantity, entry_date
+                SELECT id, team, sales_person, client_name, client_category, product, year, month, quantity, amount, entry_date
                 FROM sales_entries
                 WHERE team = %s
                 ORDER BY entry_date DESC, id DESC
             """, (user.get("team", ""),))
         else:
             cur.execute("""
-                SELECT id, team, sales_person, client_name, client_category, product, year, month, quantity, entry_date
+                SELECT id, team, sales_person, client_name, client_category, product, year, month, quantity, amount, entry_date
                 FROM sales_entries
                 WHERE sales_person = %s AND team = %s
                 ORDER BY entry_date DESC, id DESC
