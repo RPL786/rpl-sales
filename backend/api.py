@@ -3445,6 +3445,47 @@ def save_monthly_target(payload: MonthlyTargetRequest, user: dict = Depends(requ
         cur.close()
         conn.close()
 
+@app.get("/admin/monthly-targets")
+def list_monthly_targets(year: int, month: str, user: dict = Depends(require_admin)):
+    clean_month = month.strip()[:3].title()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                username,
+                team,
+                target_year,
+                target_month,
+                COALESCE(target_type, 'QTY') AS target_type,
+                COALESCE(target_value, target_kg, 0) AS target_value
+            FROM sales_targets
+            WHERE target_year = %s
+              AND target_month = %s
+        """, (int(year), clean_month))
+
+        rows = cur.fetchall()
+
+        return {
+            "targets": [
+                {
+                    "username": r[0],
+                    "team": r[1],
+                    "year": r[2],
+                    "month": r[3],
+                    "target_type": r[4],
+                    "target_value": float(r[5] or 0),
+                }
+                for r in rows
+            ]
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
 @app.get("/admin/download-backup")
 def download_backup(user: dict = Depends(require_admin)):
 
