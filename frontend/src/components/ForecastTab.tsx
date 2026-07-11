@@ -5,6 +5,11 @@ type ForecastItem = {
   sales_target: number;
   achieved: number;
   difference: number;
+  remaining?: number;
+  percent?: number;
+  remaining_percent?: number;
+  target_type?: "QTY" | "AMOUNT";
+  unit?: string;
 };
 
 export default function ForecastTab() {
@@ -13,6 +18,17 @@ export default function ForecastTab() {
   const [selectedTeam, setSelectedTeam] = useState("");
   const [selectedMonth, setSelectedMonth] = useState("");
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const formatValue = (value: number, item?: ForecastItem) => {
+  const targetType = item?.target_type || data[0]?.target_type || "QTY";
+
+  if (targetType === "AMOUNT") {
+    return `Rs. ${Number(value || 0).toLocaleString()}`;
+  }
+
+  return `${Number(value || 0).toLocaleString()} Qty`;
+};
+
+const forecastUnitLabel = data[0]?.target_type === "AMOUNT" ? "Rs" : "Qty";
 
   useEffect(() => {
     fetch("/form/options")
@@ -93,9 +109,10 @@ export default function ForecastTab() {
           <thead>
             <tr>
               <th>Sales Person</th>
-              <th>Target KGS</th>
-              <th>Achieved KGS</th>
-              <th>%</th>
+              <th>Target ({forecastUnitLabel})</th>
+              <th>Achieved ({forecastUnitLabel})</th>
+              <th>Remaining ({forecastUnitLabel})</th>
+              <th>Achieved %</th>
               <th>Remaining %</th>
             </tr>
           </thead>
@@ -114,15 +131,19 @@ export default function ForecastTab() {
                   </td>
 
                   <td>
-                    {item.sales_target.toLocaleString()}
+                    {formatValue(item.sales_target, item)}
                   </td>
 
                   <td className="achieved">
-                    {item.achieved.toLocaleString()}
+                    {formatValue(item.achieved, item)}
                   </td>
 
                   <td>
-                    {Math.round((item as any).percent || 0)}%
+                    {formatValue((item.remaining ?? item.sales_target - item.achieved), item)}
+                  </td>
+
+                  <td>
+                    {Math.round(item.percent || 0)}%
                   </td>
 
                   <td>
@@ -138,16 +159,20 @@ export default function ForecastTab() {
                 </td>
 
                 <td>
-                  <strong>{teamTotal.target.toLocaleString()}</strong>
+                  <strong>{formatValue(teamTotal.target)}</strong>
                 </td>
 
                 <td className="achieved">
-                  <strong>{teamTotal.achieved.toLocaleString()}</strong>
+                  <strong>{formatValue(teamTotal.achieved)}</strong>
+                </td>
+
+                <td>
+                  <strong>{formatValue(teamTotal.target - teamTotal.achieved)}</strong>
                 </td>
 
                 <td>
                   <strong>{Math.round(teamPercent)}%</strong>
-                </td>
+                </td>>
 
                 <td>
                   <strong>{Math.round(teamRemainingPercent)}%</strong>
