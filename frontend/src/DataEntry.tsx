@@ -17,6 +17,7 @@ type EntryItem = {
   year: number;
   month: string;
   quantity: number;
+  amount: string;
   entry_date: string;
 };
 
@@ -46,7 +47,7 @@ export default function DataEntry() {
   });
 
   const [items, setItems] = useState([
-    { product: "", quantity: "" },
+    { product: "", quantity: "", amount: "" },
   ]);
 
   const [teams, setTeams] = useState<OptionItem[]>([]);
@@ -179,7 +180,7 @@ export default function DataEntry() {
 
     if (name === "team") {
       setForm({ ...form, team: value, client_name: "" });
-      setItems([{ product: "", quantity: "" }]);
+      setItems([{ product: "", quantity: "", amount: "" }]);
       loadTeamOptions(value);
       return;
     }
@@ -199,6 +200,7 @@ export default function DataEntry() {
         sales_person: canSelectTeamAndSalesPerson ? form.sales_person : authUser?.username || "",
         product: item.product,
         quantity: Number(item.quantity),
+        amount: Number(item.amount || 0),
       };
 
       const res = await fetch(`${API_BASE_URL}/data/entry`, {
@@ -224,7 +226,7 @@ export default function DataEntry() {
       entry_date: "",
     });
 
-    setItems([{ product: "", quantity: "" }]);
+    setItems([{ product: "", : "" }]);
     loadEntries();
   };
 
@@ -237,6 +239,7 @@ export default function DataEntry() {
       entry.client_name.toLowerCase().includes(q) ||
       entry.product.toLowerCase().includes(q) ||
       String(entry.quantity).toLowerCase().includes(q) ||
+      String(entry.amount || "").toLowerCase().includes(q) ||
       String(entry.entry_date).toLowerCase().includes(q)
     );
   });
@@ -402,13 +405,31 @@ export default function DataEntry() {
               </select>
 
               <input
-                className="filter-select"
+                className="filter-select qty-input"
                 type="number"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 placeholder="Qty"
                 value={item.quantity}
+                onWheel={(e) => e.currentTarget.blur()}
                 onChange={(e) => {
                   const updated = [...items];
                   updated[index].quantity = e.target.value;
+                  setItems(updated);
+                }}
+              />
+
+              <input
+                className="filter-select qty-input"
+                type="number"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                placeholder="Amount Rs"
+                value={item.amount}
+                onWheel={(e) => e.currentTarget.blur()}
+                onChange={(e) => {
+                  const updated = [...items];
+                  updated[index].amount = e.target.value;
                   setItems(updated);
                 }}
               />
@@ -429,7 +450,7 @@ export default function DataEntry() {
 
           <button
             className="action-btn"
-            onClick={() => setItems([...items, { product: "", quantity: "" }])}
+            onClick={() => setItems([...items, { product: "", quantity: "", amount: "" }])}
           >
             + Add Product
           </button>
@@ -467,6 +488,7 @@ export default function DataEntry() {
               <th>Category</th>
               <th>Product</th>
               <th>Qty</th>
+              <th>Amount</th>
               {isAdmin && <th>Action</th>}
             </tr>
           </thead>
@@ -486,6 +508,7 @@ export default function DataEntry() {
                   <td>{entry.client_category || "-"}</td>
                   <td>{entry.product}</td>
                   <td>{entry.quantity}</td>
+                  <td>{entry.amount || 0}</td>
                   {isAdmin && (
                     <td>
                       <button className="action-btn" onClick={() => deleteEntry(entry.id)}>
