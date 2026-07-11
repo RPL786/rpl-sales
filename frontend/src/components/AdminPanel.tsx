@@ -9,6 +9,7 @@ type UserItem = {
   team: string;
   sales_target: number;
   target_duration: string;
+  target_type?: string;
 };
 
 export default function AdminPanel() {
@@ -41,6 +42,45 @@ export default function AdminPanel() {
   const authHeaders = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+  };
+
+  const getTeamTargetType = (teamName: string) => {
+    const team = teams.find((t) => t.name === teamName);
+    return team?.target_type || "QTY";
+  };
+
+  const loadMonthlyTargets = async () => {
+    const res = await fetch(
+      `${API_BASE_URL}/admin/monthly-targets?year=${targetYear}&month=${targetMonth}`,
+      { headers: authHeaders }
+    );
+
+    const result = await res.json();
+
+    if (!res.ok) {
+      setMessage(result.detail || "Monthly targets load failed");
+      return;
+    }
+
+    const targetMap = new Map(
+      (result.targets || []).map((t: any) => [
+        `${t.username}__${t.team}`,
+        t,
+      ])
+    );
+
+    setUsers((prev) =>
+      prev.map((u) => {
+        const key = `${u.username}__${u.team || ""}`;
+        const saved = targetMap.get(key);
+
+        return {
+          ...u,
+          sales_target: saved ? Number(saved.target_value || 0) : 0,
+          target_type: saved?.target_type || getTeamTargetType(u.team),
+        };
+      })
+    );
   };
 
   const loadTeamsProducts = async () => {
@@ -89,6 +129,9 @@ export default function AdminPanel() {
     }
 
     setUsers(result.users || []);
+    setTimeout(() => {
+      loadMonthlyTargets();
+    }, 300);
   };
 
   const createUser = async () => {
@@ -159,7 +202,9 @@ export default function AdminPanel() {
           year: targetYear,
           month: targetMonth,
           target_kg: u.sales_target || 0,
-        }),
+          target_type: getTeamTargetType(u.team || userTeam),
+          target_value: u.sales_target || 0,
+        }),,
       });
 
       const result = await res.json();
@@ -170,6 +215,7 @@ export default function AdminPanel() {
       }
 
       alert(`Target saved for ${targetMonth} ${targetYear}`);
+      loadMonthlyTargets();
     } catch (err) {
       console.error(err);
     }
@@ -299,6 +345,11 @@ export default function AdminPanel() {
     loadTeamsProducts();
     loadAISettings();
   }, []);
+  useEffect(() => {
+    if (users.length > 0 && teams.length > 0) {
+      loadMonthlyTargets();
+    }
+  }, [targetYear, targetMonth, teams.length]);
 
   return (
     <div className="card">
@@ -730,7 +781,7 @@ export default function AdminPanel() {
               <th>ID</th>
               <th>Username</th>
               <th>Role</th>
-              <th>Target</th>
+              <th>Monthly Target</th>
               <th>Duration</th>
               <th>Actions</th>
             </tr>
@@ -744,16 +795,22 @@ export default function AdminPanel() {
                 <td>{u.role}</td>
 
                 <td>
-                  <input
-                    className="filter-select"
-                    type="number"
-                    value={u.sales_target || 0}
-                    onChange={(e) =>
-                      setUsers(users.map((x) =>
-                        x.id === u.id ? { ...x, sales_target: Number(e.target.value) } : x
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ minWidth: 55, fontWeight: 700 }}>
+                      {getTeamTargetType(u.team) === "AMOUNT" ? "Rs" : "Qty"}
+                    </span>
+
+                    <input
+                      className="filter-select"
+                      type="number"
+                      value={u.sales_target || 0}
+                      onChange={(e) =>
+                        setUsers(users.map((x) =>
+                          x.id === u.id ? { ...x, sales_target: Number(e.target.value) } : x
                       ))
                     }
-                  />
+                    />
+                  </div>
                 </td>
 
                 <td>
