@@ -2704,6 +2704,18 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
                                     continue
 
                                 entry_date = make_month_date(year_value, month_name)
+                                amount = 0.0
+
+                                amount_col_1 = f"{month_name} Amount"
+                                amount_col_2 = f"{month_name}_Amount"
+                                amount_col_3 = f"Amount {month_name}"
+
+                                for amount_col in [amount_col_1, amount_col_2, amount_col_3]:
+                                    if amount_col in df.columns:
+                                        raw_amount = pd.to_numeric(row[amount_col], errors="coerce")
+                                        amount = 0 if pd.isna(raw_amount) else float(raw_amount)
+                                        break
+
                                 monthly_rows_to_insert.append((
                                     team,
                                     sales_person,
@@ -2713,6 +2725,7 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
                                     int(year_value),
                                     month_name,
                                     qty,
+                                    amount,
                                     entry_date,
                                 ))
 
@@ -2726,8 +2739,8 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
                     if monthly_rows_to_insert:
                         cur.executemany("""
                         INSERT INTO sales_entries
-                        (team, sales_person, client_name, client_category, product, year, month, quantity, entry_date)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        (team, sales_person, client_name, client_category, product, year, month, quantity, amount, entry_date)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, monthly_rows_to_insert)
                         inserted = len(monthly_rows_to_insert)
 
@@ -2745,6 +2758,7 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
                 workbook = pd.ExcelFile(file.file, engine="openpyxl")
 
                 expected_cols = {"Sales Person", "Client Name", "Product", "Date", "Quantity"}
+                optional_cols = {"Amount"}
                 date_frames = []
 
                 for sheet_name in workbook.sheet_names:
@@ -2763,7 +2777,11 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
                         continue
 
                     # KEEP ONLY REQUIRED COLUMNS
-                    df_sheet = df_sheet[list(expected_cols)]
+                    keep_cols = list(expected_cols)
+                    if "Amount" in df_sheet.columns:
+                        keep_cols.append("Amount")
+
+                    df_sheet = df_sheet[keep_cols]
 
                     # REMOVE BLANK ROWS
                     df_sheet = df_sheet.dropna(how="all")
@@ -2811,6 +2829,11 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
                         if pd.isna(quantity) or float(quantity) == 0:
                             continue
 
+                        amount = 0.0
+                        if "Amount" in row.index:
+                            raw_amount = pd.to_numeric(row["Amount"], errors="coerce")
+                            amount = 0 if pd.isna(raw_amount) else float(raw_amount)
+
                         parsed_date = pd.to_datetime(row["Date"], errors="coerce")
                         if pd.isna(parsed_date):
                             continue
@@ -2832,6 +2855,7 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
                             year,
                             month,
                             float(quantity),
+                            amount,
                             entry_date,
                         ))
 
@@ -2851,7 +2875,7 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
                             cur,
                             """
                             INSERT INTO sales_entries
-                            (team, sales_person, client_name, client_category, product, year, month, quantity, entry_date)
+                            (team, sales_person, client_name, client_category, product, year, month, quantity, amount, entry_date)
                             VALUES %s
                             """,
                             date_rows_to_insert,
