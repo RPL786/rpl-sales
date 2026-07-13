@@ -2059,10 +2059,7 @@ def update_team(team_id: int, payload: NameRequest, user: dict = Depends(require
             (name, target_type, team_id)
         )
 
-        cur.execute(
-            "UPDATE sales_targets SET target_type = %s WHERE team = %s",
-            (target_type, name)
-        )
+        
         conn.commit()
         return {"status": "ok", "message": "Team updated"}
     finally:
@@ -3400,7 +3397,15 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
             target_agg AS (
                 SELECT
                     LOWER(TRIM(username)) AS username_key,
-                    MAX(COALESCE(NULLIF(target_value, 0), target_kg, 0)) AS sales_target
+                    MAX(
+                        CASE
+                            WHEN %s = 'AMOUNT' AND COALESCE(target_type, 'QTY') = 'AMOUNT'
+                                THEN COALESCE(target_value, 0)
+                            WHEN %s = 'QTY' AND COALESCE(target_type, 'QTY') = 'QTY'
+                                THEN COALESCE(NULLIF(target_value, 0), target_kg, 0)
+                            ELSE 0
+                        END
+                    ) AS sales_target
                 FROM sales_targets
                 WHERE TRIM(team) = %s
                   AND target_year = %s
@@ -3428,6 +3433,8 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
             ORDER BY u.username
         """, (
             team,
+            team_target_type,
+            team_target_type,
             team,
             year,
             month,
@@ -3437,7 +3444,7 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
             month,
             month,
             team_target_type,
-        ))
+        )))
 
         rows = cur.fetchall()
         result = []
@@ -3540,15 +3547,25 @@ def list_monthly_targets(year: int, month: str, user: dict = Depends(require_adm
     try:
         cur.execute("""
             SELECT
-                username,
-                team,
-                target_year,
-                target_month,
-                COALESCE(target_type, 'QTY') AS target_type,
-                COALESCE(NULLIF(target_value, 0), target_kg, 0) AS target_value
-            FROM sales_targets
-            WHERE target_year = %s
-              AND target_month = %s
+                st.username,
+                st.team,
+                st.target_year,
+                st.target_month,
+                COALESCE(t.target_type, 'QTY') AS team_target_type,
+                CASE
+                    WHEN COALESCE(t.target_type, 'QTY') = 'AMOUNT'
+                         AND COALESCE(st.target_type, 'QTY') = 'AMOUNT'
+                        THEN COALESCE(st.target_value, 0)
+                    WHEN COALESCE(t.target_type, 'QTY') = 'QTY'
+                         AND COALESCE(st.target_type, 'QTY') = 'QTY'
+                        THEN COALESCE(NULLIF(st.target_value, 0), st.target_kg, 0)
+                    ELSE 0
+                END AS target_value
+            FROM sales_targets st
+            LEFT JOIN teams t
+                ON TRIM(t.name) = TRIM(st.team)
+            WHERE st.target_year = %s
+              AND st.target_month = %s
         """, (int(year), clean_month))
 
         rows = cur.fetchall()
