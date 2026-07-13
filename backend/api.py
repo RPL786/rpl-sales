@@ -2058,6 +2058,11 @@ def update_team(team_id: int, payload: NameRequest, user: dict = Depends(require
             "UPDATE teams SET name = %s, target_type = %s WHERE id = %s",
             (name, target_type, team_id)
         )
+
+        cur.execute(
+            "UPDATE sales_targets SET target_type = %s WHERE team = %s",
+            (target_type, name)
+        )
         conn.commit()
         return {"status": "ok", "message": "Team updated"}
     finally:
@@ -3384,7 +3389,7 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
         cur.execute(f"""
             SELECT
                 u.username,
-                COALESCE(st.target_type, %s) AS target_type,
+                %s AS target_type,
                 COALESCE(st.target_value, st.target_kg, 0) AS sales_target,
                 COALESCE(SUM({achieved_field}), 0) AS achieved
             FROM users u
