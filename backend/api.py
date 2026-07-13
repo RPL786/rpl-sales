@@ -3545,7 +3545,7 @@ def list_monthly_targets(year: int, month: str, user: dict = Depends(require_adm
                 target_year,
                 target_month,
                 COALESCE(target_type, 'QTY') AS target_type,
-                COALESCE(target_value, target_kg, 0) AS target_value
+                COALESCE(NULLIF(target_value, 0), target_kg, 0) AS target_value
             FROM sales_targets
             WHERE target_year = %s
               AND target_month = %s
