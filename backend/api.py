@@ -589,6 +589,27 @@ def ensure_database_schema():
     """)
 
     cur.execute("""
+    CREATE TABLE IF NOT EXISTS ai_settings (
+        id SERIAL PRIMARY KEY,
+        provider TEXT DEFAULT 'gemini',
+        model TEXT DEFAULT 'gemini-1.5-flash',
+        fallback_model TEXT DEFAULT 'gemini-1.5-flash',
+        api_key TEXT DEFAULT '',
+        timeout_seconds INTEGER DEFAULT 180,
+        enabled BOOLEAN DEFAULT false,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cur.execute("""
+    INSERT INTO ai_settings (
+        provider, model, fallback_model, api_key, timeout_seconds, enabled
+    )
+    SELECT 'gemini', 'gemini-1.5-flash', 'gemini-1.5-flash', '', 180, false
+    WHERE NOT EXISTS (SELECT 1 FROM ai_settings)
+    """)
+    
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS visit_entries (
         id SERIAL PRIMARY KEY,
         created_by TEXT NOT NULL,
@@ -1854,8 +1875,13 @@ def update_admin_ai_settings(payload: AISettingsUpdate, user: dict = Depends(req
     global GEMINI_MODEL
     global GEMINI_TIMEOUT_SECONDS
 
-    AI_SETTINGS = get_ai_settings()
-
+    try:
+        ensure_database_schema()
+        AI_SETTINGS = get_ai_settings()
+    except Exception as exc:
+        print("AI SETTINGS LOAD SKIPPED:", str(exc), flush=True)
+        AI_SETTINGS = None
+    
     GEMINI_API_KEY = AI_SETTINGS["api_key"]
     GEMINI_MODEL = AI_SETTINGS["model"]
     GEMINI_TIMEOUT_SECONDS = AI_SETTINGS["timeout_seconds"]
