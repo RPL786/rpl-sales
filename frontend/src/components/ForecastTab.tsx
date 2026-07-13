@@ -172,7 +172,7 @@ const forecastUnitLabel = data[0]?.target_type === "AMOUNT" ? "Rs" : "Qty";
 
                 <td>
                   <strong>{Math.round(teamPercent)}%</strong>
-                </td>>
+                </td>
 
                 <td>
                   <strong>{Math.round(teamRemainingPercent)}%</strong>
