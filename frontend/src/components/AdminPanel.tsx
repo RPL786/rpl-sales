@@ -272,6 +272,27 @@ export default function AdminPanel() {
     }
   };
 
+  const updateTeamTargetType = async (team: any, targetType: string) => {
+    const res = await fetch(`${API_BASE_URL}/api/teams/${team.id}`, {
+      method: "PUT",
+      headers: authHeaders,
+      body: JSON.stringify({
+        name: team.name,
+        target_type: targetType,
+      }),
+    });
+
+    const result = await res.json();
+
+    if (!res.ok) {
+      setMessage(result.detail || "Team update failed");
+      return;
+    }
+
+    setMessage("Team target type updated ✅");
+    loadTeamsProducts();
+  };
+  
   const deleteTeam = async (id: number) => {
     if (!window.confirm("Delete this team?")) return;
 
@@ -587,7 +608,17 @@ export default function AdminPanel() {
               <tr key={team.id}>
                 <td>{team.id}</td>
                 <td>{team.name}</td>
-                <td>{team.target_type || "QTY"}</td>
+                <td>
+                  <select
+                    className="filter-select"
+                    value={team.target_type || "QTY"}
+                    onChange={(e) => updateTeamTargetType(team, e.target.value)}
+                  >
+                    <option value="QTY">QTY</option>
+                    <option value="AMOUNT">AMOUNT</option>
+                  </select>
+                </td>
+                
                 <td>
                   <button className="action-btn" onClick={() => deleteTeam(team.id)}>
                     Delete
