@@ -226,7 +226,7 @@ export default function DataEntry() {
       entry_date: "",
     });
 
-    setItems([{ product: "", : "" }]);
+    setItems([{ product: "", quantity: "", amount: "" }]);
     loadEntries();
   };
 
