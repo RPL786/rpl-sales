@@ -72,7 +72,7 @@ export default function AdminPanel() {
     setUsers((prev) =>
       prev.map((u) => {
         const key = `${u.username}__${u.team || ""}`;
-        const saved = targetMap.get(key);
+        const saved = targetMap.get(key) as any;
 
         return {
           ...u,
