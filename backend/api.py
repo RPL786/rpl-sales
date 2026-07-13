@@ -3400,7 +3400,7 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
             target_agg AS (
                 SELECT
                     LOWER(TRIM(username)) AS username_key,
-                    MAX(COALESCE(target_value, target_kg, 0)) AS sales_target
+                    MAX(COALESCE(NULLIF(target_value, 0), target_kg, 0)) AS sales_target
                 FROM sales_targets
                 WHERE TRIM(team) = %s
                   AND target_year = %s
