@@ -5,3 +5,7 @@ pandas
 openpyxl
 python-dotenv
 pydantic
+psycopg2-binary
+python-jose[cryptography]
+passlib[bcrypt]
+google-generativeai
