@@ -2040,6 +2040,29 @@ def add_team(payload: NameRequest, user: dict = Depends(require_admin)):
     finally:
         conn.close()
 
+@app.put("/api/teams/{team_id}")
+def update_team(team_id: int, payload: NameRequest, user: dict = Depends(require_admin)):
+    name = payload.name.strip()
+    target_type = (payload.target_type or "QTY").strip().upper()
+
+    if target_type not in {"QTY", "AMOUNT"}:
+        target_type = "QTY"
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Team name required")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "UPDATE teams SET name = %s, target_type = %s WHERE id = %s",
+            (name, target_type, team_id)
+        )
+        conn.commit()
+        return {"status": "ok", "message": "Team updated"}
+    finally:
+        conn.close()
+
 
 @app.delete("/api/teams/{team_id}")
 def delete_team(team_id: int, user: dict = Depends(require_admin)):
