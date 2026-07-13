@@ -3397,7 +3397,7 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
             target_agg AS (
                 SELECT
                     LOWER(TRIM(username)) AS username_key,
-                    MAX(
+                    SUM(
                         CASE
                             WHEN %s = 'AMOUNT' AND COALESCE(target_type, 'QTY') = 'AMOUNT'
                                 THEN COALESCE(target_value, 0)
