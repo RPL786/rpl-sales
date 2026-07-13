@@ -3386,27 +3386,58 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
 
         achieved_field = "se.amount" if team_target_type == "AMOUNT" else "se.quantity"
 
+        achieved_field = "amount" if team_target_type == "AMOUNT" else "quantity"
+
         cur.execute(f"""
+            WITH team_users AS (
+                SELECT
+                    LOWER(TRIM(username)) AS username_key,
+                    MIN(TRIM(username)) AS username
+                FROM users
+                WHERE TRIM(team) = %s
+                GROUP BY LOWER(TRIM(username))
+            ),
+            target_agg AS (
+                SELECT
+                    LOWER(TRIM(username)) AS username_key,
+                    MAX(COALESCE(target_value, target_kg, 0)) AS sales_target
+                FROM sales_targets
+                WHERE TRIM(team) = %s
+                  AND target_year = %s
+                  AND (%s = '' OR target_month = %s)
+                GROUP BY LOWER(TRIM(username))
+            ),
+            entry_agg AS (
+                SELECT
+                    LOWER(TRIM(sales_person)) AS username_key,
+                    SUM(COALESCE({achieved_field}, 0)) AS achieved
+                FROM sales_entries
+                WHERE TRIM(team) = %s
+                  AND year = %s
+                  AND (%s = '' OR month = %s)
+                GROUP BY LOWER(TRIM(sales_person))
+            )
             SELECT
                 u.username,
                 %s AS target_type,
-                COALESCE(st.target_value, st.target_kg, 0) AS sales_target,
-                COALESCE(SUM({achieved_field}), 0) AS achieved
-            FROM users u
-            LEFT JOIN sales_targets st
-                ON st.username = u.username
-                AND st.team = u.team
-                AND st.target_year = %s
-                AND (%s = '' OR st.target_month = %s)
-            LEFT JOIN sales_entries se
-                ON LOWER(TRIM(se.sales_person)) = LOWER(TRIM(u.username))
-                AND se.team = %s
-                AND se.year = %s
-                AND (%s = '' OR se.month = %s)
-            WHERE u.team = %s
-            GROUP BY u.username, st.target_type, st.target_value, st.target_kg
+                COALESCE(t.sales_target, 0) AS sales_target,
+                COALESCE(e.achieved, 0) AS achieved
+            FROM team_users u
+            LEFT JOIN target_agg t ON t.username_key = u.username_key
+            LEFT JOIN entry_agg e ON e.username_key = u.username_key
             ORDER BY u.username
-        """, (team_target_type, year, month, month, team, year, month, month, team))
+        """, (
+            team,
+            team,
+            year,
+            month,
+            month,
+            team,
+            year,
+            month,
+            month,
+            team_target_type,
+        ))
 
         rows = cur.fetchall()
         result = []
