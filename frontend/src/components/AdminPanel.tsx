@@ -204,7 +204,7 @@ export default function AdminPanel() {
           target_kg: u.sales_target || 0,
           target_type: getTeamTargetType(u.team || userTeam),
           target_value: u.sales_target || 0,
-        }),,
+        }),
       });
 
       const result = await res.json();
