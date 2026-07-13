@@ -3444,7 +3444,7 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
             month,
             month,
             team_target_type,
-        )))
+        ))
 
         rows = cur.fetchall()
         result = []
