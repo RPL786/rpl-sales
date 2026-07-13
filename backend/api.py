@@ -1786,7 +1786,7 @@ def admin_create_user(payload: UserRegisterRequest, user: dict = Depends(require
         conn.close()
 
 @app.get("/admin/ai-settings")
-def get_admin_ai_settings():
+def get_admin_ai_settings(user: dict = Depends(require_admin)):
     settings = get_ai_settings()
 
     if not settings:
@@ -1807,7 +1807,7 @@ def get_admin_ai_settings():
     return safe_settings
 
 @app.put("/admin/ai-settings")
-def update_admin_ai_settings(payload: AISettingsUpdate):
+def update_admin_ai_settings(payload: AISettingsUpdate, user: dict = Depends(require_admin)):
     conn = get_db_connection()
     cur = conn.cursor()
 
