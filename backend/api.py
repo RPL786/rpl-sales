@@ -3770,6 +3770,48 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
         total_amount = float(sales_row[1] or 0)
         total_entries = int(sales_row[2] or 0)
 
+                # product-wise sales summary
+        product_filters = []
+        product_params = []
+
+        if selected_team:
+            product_filters.append("TRIM(team) = %s")
+            product_params.append(selected_team)
+
+        if salesperson:
+            product_filters.append("LOWER(TRIM(sales_person)) = LOWER(TRIM(%s))")
+            product_params.append(salesperson)
+
+        product_filters.append("year = %s")
+        product_params.append(year)
+
+        if month:
+            product_filters.append("month = %s")
+            product_params.append(month)
+
+        product_where_sql = " AND ".join(product_filters)
+
+        cur.execute(f"""
+            SELECT
+                product,
+                COALESCE(SUM(quantity), 0) AS total_qty,
+                COALESCE(SUM(amount), 0) AS total_amount
+            FROM sales_entries
+            WHERE {product_where_sql}
+            GROUP BY product
+            ORDER BY COALESCE(SUM({achieved_field}), 0) DESC
+            LIMIT 20
+        """, tuple(product_params))
+
+        product_breakdown = [
+            {
+                "product": r[0],
+                "quantity": float(r[1] or 0),
+                "amount": float(r[2] or 0),
+            }
+            for r in cur.fetchall()
+        ]
+
         # visits summary
         visit_filters = []
         visit_params = []
@@ -3853,6 +3895,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 "total_entries": total_entries,
                 "achieved": achieved,
                 "unit": unit,
+                "product_breakdown": product_breakdown,
             },
             "target": {
                 "target_value": target_value,
@@ -3881,11 +3924,33 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             answer = ai_answer.get("summary") or json.dumps(ai_answer, ensure_ascii=False)
         except Exception:
             if salesperson:
-                answer = (
-                    f"{salesperson} ka {month or 'full year'} result: "
-                    f"Achieved {achieved:,.0f} {unit}, Target {target_value:,.0f} {unit}, "
-                    f"Achievement {percent:.1f}%. Visits {total_visits}, clients visited {visited_clients}."
-                )
+                if "kon kon" in question.lower() or "which product" in question.lower() or "products" in question.lower():
+                    if product_breakdown:
+                        lines = []
+                        for item in product_breakdown:
+                            if team_target_type == "AMOUNT":
+                                lines.append(
+                                    f"{item['product']}: {item['amount']:,.0f} Rs "
+                                    f"({item['quantity']:,.0f} Qty)"
+                                )
+                            else:
+                                lines.append(
+                                    f"{item['product']}: {item['quantity']:,.0f} Qty "
+                                    f"(Rs {item['amount']:,.0f})"
+                                )
+
+                        answer = (
+                            f"{salesperson} ne {month or 'full year'} me ye products sale ki:\n"
+                            + "\n".join(lines)
+                        )
+                    else:
+                        answer = f"{salesperson} ki {month or 'full year'} me product-wise sale nahi mili."
+                else:
+                    answer = (
+                        f"{salesperson} ka {month or 'full year'} result: "
+                        f"Achieved {achieved:,.0f} {unit}, Target {target_value:,.0f} {unit}, "
+                        f"Achievement {percent:.1f}%. Visits {total_visits}, clients visited {visited_clients}."
+                    ))
             else:
                 answer = (
                     f"Is question ke liye salesperson clear detect nahi hua. "
