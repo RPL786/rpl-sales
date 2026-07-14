@@ -3799,8 +3799,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             FROM sales_entries
             WHERE {product_where_sql}
             GROUP BY product
-            ORDER BY COALESCE(SUM({achieved_field}), 0) DESC
-            LIMIT 20
+            ORDER BY COALESCE(SUM({achieved_field}), 0) DESC            
         """, tuple(product_params))
 
         product_breakdown = [
@@ -3940,8 +3939,10 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                                 )
 
                         answer = (
-                            f"{salesperson} ne {month or 'full year'} me ye products sale ki:\n"
-                            + "\n".join(lines)
+                            f"{salesperson} ne {month or 'full year'} me total {total_qty:,.0f} Qty sale ki.\n\n"
+                            f"Top products:\n"
+                            + "\n".join([f"{i+1}. {line}" for i, line in enumerate(lines)])
+                            + f"\n\nTotal products sold: {len(product_breakdown)}"
                         )
                     else:
                         answer = f"{salesperson} ki {month or 'full year'} me product-wise sale nahi mili."
