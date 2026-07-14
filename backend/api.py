@@ -1998,6 +1998,10 @@ class MonthlyTargetRequest(BaseModel):
     target_type: str = "QTY"
     target_value: float = 0
 
+class BossAgentRequest(BaseModel):
+    question: str
+    team: str = ""
+
 @app.get("/api/teams")
 def list_teams(user: dict = Depends(get_current_user)):
     conn = get_db_connection()
@@ -3582,6 +3586,315 @@ def list_monthly_targets(year: int, month: str, user: dict = Depends(require_adm
                 }
                 for r in rows
             ]
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+def extract_month_from_question(question: str) -> str:
+    q = question.lower()
+
+    month_map = {
+        "jan": "Jan", "january": "Jan",
+        "feb": "Feb", "february": "Feb",
+        "mar": "Mar", "march": "Mar",
+        "apr": "Apr", "april": "Apr",
+        "may": "May",
+        "jun": "Jun", "june": "Jun",
+        "jul": "Jul", "july": "Jul",
+        "aug": "Aug", "august": "Aug",
+        "sep": "Sep", "september": "Sep",
+        "oct": "Oct", "october": "Oct",
+        "nov": "Nov", "november": "Nov",
+        "dec": "Dec", "december": "Dec",
+    }
+
+    for key, value in month_map.items():
+        if key in q:
+            return value
+
+    return ""
+
+
+def find_best_salesperson(question: str, names: list[str]) -> str:
+    q = question.lower()
+
+    for name in names:
+        if name and name.lower() in q:
+            return name
+
+    # simple partial match
+    for name in names:
+        parts = name.lower().split()
+        if any(part in q for part in parts if len(part) >= 3):
+            return name
+
+    return ""
+
+
+def find_best_product(question: str, products: list[str]) -> str:
+    q = question.lower()
+
+    for product in products:
+        if product and product.lower() in q:
+            return product
+
+    for product in products:
+        parts = product.lower().split()
+        if any(part in q for part in parts if len(part) >= 4):
+            return product
+
+    return ""
+
+
+@app.post("/api/boss-agent")
+def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default="")):
+    expected_key = os.getenv("BOSS_AGENT_KEY", "").strip()
+
+    if not expected_key:
+        raise HTTPException(status_code=500, detail="BOSS_AGENT_KEY is not configured")
+
+    if x_boss_agent_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid boss agent key")
+
+    question = payload.question.strip()
+    selected_team = payload.team.strip()
+
+    if not question:
+        raise HTTPException(status_code=400, detail="Question is required")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # available teams
+        cur.execute("SELECT name, COALESCE(target_type, 'QTY') FROM teams ORDER BY name")
+        team_rows = cur.fetchall()
+        teams = [{"name": r[0], "target_type": r[1]} for r in team_rows]
+
+        if not selected_team and teams:
+            for t in teams:
+                if t["name"].lower() in question.lower():
+                    selected_team = t["name"]
+                    break
+
+        # available sales persons
+        if selected_team:
+            cur.execute("""
+                SELECT DISTINCT sales_person
+                FROM sales_entries
+                WHERE TRIM(team) = %s
+
+                UNION
+
+                SELECT DISTINCT sales_person
+                FROM visit_entries
+                WHERE TRIM(team) = %s
+            """, (selected_team, selected_team))
+        else:
+            cur.execute("""
+                SELECT DISTINCT sales_person
+                FROM sales_entries
+
+                UNION
+
+                SELECT DISTINCT sales_person
+                FROM visit_entries
+            """)
+
+        sales_people = [r[0] for r in cur.fetchall() if r[0]]
+        salesperson = find_best_salesperson(question, sales_people)
+
+        # available products
+        if selected_team:
+            cur.execute("""
+                SELECT DISTINCT product
+                FROM sales_entries
+                WHERE TRIM(team) = %s
+            """, (selected_team,))
+        else:
+            cur.execute("SELECT DISTINCT product FROM sales_entries")
+
+        products = [r[0] for r in cur.fetchall() if r[0]]
+        product = find_best_product(question, products)
+
+        month = extract_month_from_question(question)
+        year = datetime.now().year
+
+        # team target type
+        team_target_type = "QTY"
+        if selected_team:
+            cur.execute("SELECT COALESCE(target_type, 'QTY') FROM teams WHERE name = %s", (selected_team,))
+            tr = cur.fetchone()
+            if tr:
+                team_target_type = str(tr[0] or "QTY").upper()
+
+        achieved_field = "amount" if team_target_type == "AMOUNT" else "quantity"
+
+        filters = []
+        params = []
+
+        if selected_team:
+            filters.append("TRIM(team) = %s")
+            params.append(selected_team)
+
+        if salesperson:
+            filters.append("LOWER(TRIM(sales_person)) = LOWER(TRIM(%s))")
+            params.append(salesperson)
+
+        if product:
+            filters.append("LOWER(TRIM(product)) = LOWER(TRIM(%s))")
+            params.append(product)
+
+        filters.append("year = %s")
+        params.append(year)
+
+        if month:
+            filters.append("month = %s")
+            params.append(month)
+
+        where_sql = " AND ".join(filters)
+
+        cur.execute(f"""
+            SELECT
+                COALESCE(SUM(quantity), 0) AS total_qty,
+                COALESCE(SUM(amount), 0) AS total_amount,
+                COUNT(*) AS total_entries
+            FROM sales_entries
+            WHERE {where_sql}
+        """, tuple(params))
+
+        sales_row = cur.fetchone()
+        total_qty = float(sales_row[0] or 0)
+        total_amount = float(sales_row[1] or 0)
+        total_entries = int(sales_row[2] or 0)
+
+        # visits summary
+        visit_filters = []
+        visit_params = []
+
+        if selected_team:
+            visit_filters.append("TRIM(team) = %s")
+            visit_params.append(selected_team)
+
+        if salesperson:
+            visit_filters.append("LOWER(TRIM(sales_person)) = LOWER(TRIM(%s))")
+            visit_params.append(salesperson)
+
+        if month:
+            visit_filters.append("TO_CHAR(meeting_date::date, 'Mon') = %s")
+            visit_params.append(month)
+
+        visit_where = " AND ".join(visit_filters) if visit_filters else "1=1"
+
+        cur.execute(f"""
+            SELECT
+                COUNT(*) AS total_visits,
+                COALESCE(SUM(order_amount), 0) AS visit_order_amount,
+                COUNT(DISTINCT client_name) AS visited_clients
+            FROM visit_entries
+            WHERE {visit_where}
+        """, tuple(visit_params))
+
+        visit_row = cur.fetchone()
+        total_visits = int(visit_row[0] or 0)
+        visit_order_amount = float(visit_row[1] or 0)
+        visited_clients = int(visit_row[2] or 0)
+
+        # target
+        target_value = 0.0
+        if salesperson and selected_team:
+            if team_target_type == "AMOUNT":
+                target_expr = """
+                    CASE
+                        WHEN COALESCE(target_type, 'QTY') = 'AMOUNT'
+                            THEN COALESCE(target_value, 0)
+                        ELSE 0
+                    END
+                """
+            else:
+                target_expr = """
+                    CASE
+                        WHEN COALESCE(target_type, 'QTY') = 'QTY'
+                            THEN COALESCE(NULLIF(target_value, 0), target_kg, 0)
+                        ELSE 0
+                    END
+                """
+
+            cur.execute(f"""
+                SELECT COALESCE(SUM({target_expr}), 0)
+                FROM sales_targets
+                WHERE LOWER(TRIM(username)) = LOWER(TRIM(%s))
+                  AND TRIM(team) = %s
+                  AND target_year = %s
+                  AND (%s = '' OR target_month = %s)
+            """, (salesperson, selected_team, year, month, month))
+
+            target_value = float(cur.fetchone()[0] or 0)
+
+        achieved = total_amount if team_target_type == "AMOUNT" else total_qty
+        percent = (achieved / target_value * 100) if target_value else 0
+        remaining = target_value - achieved
+
+        unit = "Rs" if team_target_type == "AMOUNT" else "Qty"
+
+        context = {
+            "question": question,
+            "team": selected_team,
+            "team_target_type": team_target_type,
+            "salesperson": salesperson,
+            "product": product,
+            "month": month or "Full Year",
+            "year": year,
+            "sales": {
+                "total_quantity": total_qty,
+                "total_amount": total_amount,
+                "total_entries": total_entries,
+                "achieved": achieved,
+                "unit": unit,
+            },
+            "target": {
+                "target_value": target_value,
+                "achieved_percent": round(percent, 2),
+                "remaining": remaining,
+                "unit": unit,
+            },
+            "visits": {
+                "total_visits": total_visits,
+                "visited_clients": visited_clients,
+                "visit_order_amount": visit_order_amount,
+            },
+        }
+
+        prompt = (
+            "You are a boss sales assistant for Ressichem. "
+            "Answer in simple Roman Urdu. Be short, practical, and direct. "
+            "Use only the provided data. Do not invent data. "
+            "If target is missing, clearly say target set nahi hai. "
+            "If amount is zero for AMOUNT team, say amount data upload/enter nahi hua. "
+            f"\n\nDATA:\n{json.dumps(context, ensure_ascii=False)}"
+        )
+
+        try:
+            ai_answer = call_ai_json(prompt)
+            answer = ai_answer.get("summary") or json.dumps(ai_answer, ensure_ascii=False)
+        except Exception:
+            if salesperson:
+                answer = (
+                    f"{salesperson} ka {month or 'full year'} result: "
+                    f"Achieved {achieved:,.0f} {unit}, Target {target_value:,.0f} {unit}, "
+                    f"Achievement {percent:.1f}%. Visits {total_visits}, clients visited {visited_clients}."
+                )
+            else:
+                answer = (
+                    f"Is question ke liye salesperson clear detect nahi hua. "
+                    f"Team: {selected_team or 'not selected'}, Month: {month or 'Full Year'}."
+                )
+
+        return {
+            "answer": answer,
+            "data": context,
         }
 
     finally:
