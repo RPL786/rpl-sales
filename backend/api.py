@@ -3950,7 +3950,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                         f"{salesperson} ka {month or 'full year'} result: "
                         f"Achieved {achieved:,.0f} {unit}, Target {target_value:,.0f} {unit}, "
                         f"Achievement {percent:.1f}%. Visits {total_visits}, clients visited {visited_clients}."
-                    ))
+                    )
             else:
                 answer = (
                     f"Is question ke liye salesperson clear detect nahi hua. "
