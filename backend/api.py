@@ -3837,17 +3837,27 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
         clients = [r[0] for r in cur.fetchall() if r[0]]
         client = ""
 
-        for c in clients:
-            if c and c.lower() in q_lower:
-                client = c
-                break
+        client_words = ["client", "clients", "customer", "customers", "party", "parties"]
+        should_detect_client = any(word in q_lower for word in client_words)
 
-        if not client:
+        if should_detect_client:
             for c in clients:
-                parts = str(c).lower().split()
-                if any(part in q_lower for part in parts if len(part) >= 4):
-                    client = c
+                c_clean = str(c or "").strip()
+                if c_clean and c_clean.lower() in q_lower:
+                    client = c_clean
                     break
+
+            if not client:
+                for c in clients:
+                    c_clean = str(c or "").strip()
+                    parts = [p for p in c_clean.lower().split() if len(p) >= 5]
+                    matched_parts = [p for p in parts if p in q_lower]
+
+                    # client tabhi detect karo jab kam az kam 2 strong words match hon
+                    # taake "Ali Khan" se "ALIYAN AHMED KHAN" client na ban jaye
+                    if len(matched_parts) >= 2:
+                        client = c_clean
+                        break
 
         # -----------------------------
         # 5) Team target type
