@@ -4129,6 +4129,104 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             for r in cur.fetchall()
         ]
 
+                # -----------------------------
+        # 14B) On-call / on-phone notes based visits
+        # -----------------------------
+        cur.execute(f"""
+            SELECT
+                sales_person,
+                COUNT(*) AS call_phone_visits,
+                COUNT(DISTINCT client_name) AS clients_count,
+                COALESCE(SUM(order_amount), 0) AS total_order_amount,
+                COALESCE(SUM(quantity), 0) AS total_quantity,
+                STRING_AGG(DISTINCT client_name, ', ') AS clients
+            FROM visit_entries
+            WHERE {visit_where}
+              AND (
+                    LOWER(COALESCE(notes, '')) LIKE '%call%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%phone%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%on call%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%on phone%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%telephonic%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%whatsapp call%'
+
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%call%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%phone%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%on call%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%on phone%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%telephonic%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%whatsapp call%'
+
+                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%call%'
+                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%phone%'
+              )
+            GROUP BY sales_person
+            ORDER BY COUNT(*) DESC
+            LIMIT 10
+        """, tuple(visit_params))
+
+        call_phone_top = [
+            {
+                "sales_person": r[0],
+                "call_phone_visits": int(r[1] or 0),
+                "clients_count": int(r[2] or 0),
+                "order_amount": float(r[3] or 0),
+                "quantity": float(r[4] or 0),
+                "clients": r[5] or "",
+            }
+            for r in cur.fetchall()
+        ]
+
+        cur.execute(f"""
+            SELECT
+                sales_person,
+                client_name,
+                product,
+                meeting_date,
+                meeting_status,
+                client_response,
+                notes,
+                COALESCE(order_amount, 0) AS order_amount,
+                COALESCE(quantity, 0) AS quantity
+            FROM visit_entries
+            WHERE {visit_where}
+              AND (
+                    LOWER(COALESCE(notes, '')) LIKE '%call%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%phone%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%on call%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%on phone%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%telephonic%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%whatsapp call%'
+
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%call%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%phone%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%on call%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%on phone%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%telephonic%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%whatsapp call%'
+
+                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%call%'
+                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%phone%'
+              )
+            ORDER BY meeting_date DESC, sales_person, client_name
+            LIMIT 50
+        """, tuple(visit_params))
+
+        call_phone_details = [
+            {
+                "sales_person": r[0],
+                "client_name": r[1],
+                "product": r[2],
+                "meeting_date": str(r[3] or ""),
+                "meeting_status": r[4] or "",
+                "client_response": r[5] or "",
+                "notes": r[6] or "",
+                "order_amount": float(r[7] or 0),
+                "quantity": float(r[8] or 0),
+            }
+            for r in cur.fetchall()
+        ]
+
         # -----------------------------
         # 15) Suspicious / fake visit audit
         # -----------------------------
@@ -4294,6 +4392,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
         # 17) Build answer based on question type
         # -----------------------------
         wants_visit_audit = any(word in q_lower for word in ["fake", "audit", "suspicious", "jhooti", "jhoot", "verify", "verification"])
+        wants_call_phone = any(word in q_lower for word in ["call", "phone", "on call", "on phone", "telephonic", "whatsapp call"])
         wants_visit = "visit" in q_lower or "visits" in q_lower
         wants_product = "product" in q_lower or "products" in q_lower or "kon kon si" in q_lower
         wants_client = "client" in q_lower or "clients" in q_lower or "customer" in q_lower
@@ -4302,6 +4401,44 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
         wants_amount = "amount" in q_lower or "rs" in q_lower or "rupees" in q_lower or "pkr" in q_lower
 
         period_text = f"{month} {year}" if month else f"Full Year {year}"
+
+        if wants_call_phone:
+            if call_phone_top:
+                top_lines = []
+                for item in call_phone_top:
+                    top_lines.append(
+                        f"- {item['sales_person']}: {item['call_phone_visits']} call/phone notes, "
+                        f"Clients {item['clients_count']}, Order Rs {item['order_amount']:,.0f}, "
+                        f"Qty {item['quantity']:,.0f}"
+                    )
+
+                detail_lines = []
+                for item in call_phone_details[:20]:
+                    note_text = item["notes"] or item["client_response"] or item["meeting_status"]
+                    note_text = str(note_text).strip()
+                    if len(note_text) > 80:
+                        note_text = note_text[:80] + "..."
+
+                    detail_lines.append(
+                        f"- {item['sales_person']} | {item['client_name']} | {item['product']} | "
+                        f"{item['meeting_date']}: {note_text}"
+                    )
+
+                answer = (
+                    f"On-call / on-phone notes report {period_text}:\n\n"
+                    f"Top salespersons:\n"
+                    + "\n".join(top_lines)
+                    + "\n\nRecent/details:\n"
+                    + ("\n".join(detail_lines) if detail_lines else "Detail notes nahi mili.")
+                    + "\n\nNote: Ye report notes/client response/status ke text se detect hui hai."
+                )
+            else:
+                answer = (
+                    f"{period_text} me notes/client response/status ke andar "
+                    f"call/phone/on-call/on-phone ka record nahi mila."
+                )
+
+        elif wants_visit_audit:
 
         if wants_visit_audit:
             if suspicious_visits:
@@ -4507,6 +4644,8 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 "visit_order_amount": visit_order_amount,
                 "visit_quantity": visit_quantity,
                 "repeat_clients": repeat_clients,
+                "call_phone_top": call_phone_top,
+                "call_phone_details": call_phone_details,
                 "suspicious_visits": suspicious_visits,
             },
             "breakdowns": {
