@@ -3957,6 +3957,16 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 f"Salesperson clear detect nahi hua. "
                 f"Question me exact salesperson name aur team mention karein."
             )
+
+        return {
+            "answer": answer,
+            "data": context,
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+        
 @app.get("/admin/download-backup")
 def download_backup(user: dict = Depends(require_admin)):
 
