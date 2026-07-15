@@ -4438,9 +4438,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                     f"call/phone/on-call/on-phone ka record nahi mila."
                 )
 
-        elif wants_visit_audit:
-
-        if wants_visit_audit:
+        elif wants_visit_audit:        
             if suspicious_visits:
                 lines = []
                 for item in suspicious_visits:
