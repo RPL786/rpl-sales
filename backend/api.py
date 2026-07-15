@@ -3673,6 +3673,24 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
 
     q_lower = question.lower()
 
+    roman_words = [
+        "kitna", "kitni", "kitne", "batao", "kya", "kon", "kaun", "kis",
+        "main", "mein", "hai", "hain", "tha", "thi", "thay", "ne", "ki",
+        "ka", "kri", "kari", "hua", "hui", "wale", "wala", "zyada", "kam"
+    ]
+    is_roman_urdu = any(w in q_lower.split() for w in roman_words)
+
+    def reply(en_text: str, ru_text: str) -> str:
+        return ru_text if is_roman_urdu else en_text
+
+    month = extract_month_from_question(question)
+
+    month_num_map = {
+        "Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04",
+        "May": "05", "Jun": "06", "Jul": "07", "Aug": "08",
+        "Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12",
+    }
+
     year_matches = re.findall(r"\b(20\d{2})\b", question)
     years = sorted(list(set([int(y) for y in year_matches])))
 
@@ -3680,19 +3698,25 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
         years = [datetime.now().year]
 
     year = years[-1]
-    compare_years = years
 
-    if len(compare_years) == 1 and any(word in q_lower for word in ["compare", "comparison", "vs", "versus", "last year", "previous year", "2025"]):
+    wants_comparison = any(
+        word in q_lower
+        for word in ["compare", "comparison", "vs", "versus", "last year", "previous year", "2025", "2024"]
+    )
+
+    compare_years = years
+    if wants_comparison and len(compare_years) == 1:
         compare_years = [year - 1, year]
 
-    month = extract_month_from_question(question)
+    period_text_en = f"{month} {year}" if month else f"Full Year {year}"
+    period_text_ru = f"{month} {year}" if month else f"Full Year {year}"
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
         # -----------------------------
-        # 1) Detect team
+        # Detect team
         # -----------------------------
         cur.execute("SELECT name, COALESCE(target_type, 'QTY') FROM teams ORDER BY name")
         team_rows = cur.fetchall()
@@ -3713,7 +3737,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                     break
 
         # -----------------------------
-        # 2) Detect salesperson
+        # Detect salesperson
         # -----------------------------
         if selected_team:
             cur.execute("""
@@ -3752,7 +3776,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
         sales_people = [r[0] for r in cur.fetchall() if r[0]]
         salesperson = find_best_salesperson(question, sales_people)
 
-        # if salesperson found but team missing, detect team from users first
+        # auto team from salesperson
         if salesperson and not selected_team:
             cur.execute("""
                 SELECT team
@@ -3761,43 +3785,38 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                   AND COALESCE(TRIM(team), '') <> ''
                 LIMIT 1
             """, (salesperson,))
+            row = cur.fetchone()
+            if row and row[0]:
+                selected_team = row[0]
 
-            user_team_row = cur.fetchone()
-            if user_team_row and user_team_row[0]:
-                selected_team = user_team_row[0]
-
-        # fallback team detection from sales data
         if salesperson and not selected_team:
             cur.execute("""
-                SELECT team, COUNT(*) AS total_rows
+                SELECT team, COUNT(*)
                 FROM sales_entries
                 WHERE LOWER(TRIM(sales_person)) = LOWER(TRIM(%s))
                 GROUP BY team
-                ORDER BY total_rows DESC
+                ORDER BY COUNT(*) DESC
                 LIMIT 1
             """, (salesperson,))
+            row = cur.fetchone()
+            if row and row[0]:
+                selected_team = row[0]
 
-            sales_team_row = cur.fetchone()
-            if sales_team_row and sales_team_row[0]:
-                selected_team = sales_team_row[0]
-
-        # fallback team detection from visit data
         if salesperson and not selected_team:
             cur.execute("""
-                SELECT team, COUNT(*) AS total_rows
+                SELECT team, COUNT(*)
                 FROM visit_entries
                 WHERE LOWER(TRIM(sales_person)) = LOWER(TRIM(%s))
                 GROUP BY team
-                ORDER BY total_rows DESC
+                ORDER BY COUNT(*) DESC
                 LIMIT 1
             """, (salesperson,))
-
-            visit_team_row = cur.fetchone()
-            if visit_team_row and visit_team_row[0]:
-                selected_team = visit_team_row[0]
+            row = cur.fetchone()
+            if row and row[0]:
+                selected_team = row[0]
 
         # -----------------------------
-        # 3) Detect product
+        # Detect product
         # -----------------------------
         if selected_team:
             cur.execute("""
@@ -3826,38 +3845,38 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
         product = find_best_product(question, products)
 
         # -----------------------------
-        # 4) Detect client
+        # Detect client only when user asks about client/customer/party
         # -----------------------------
-        if selected_team:
-            cur.execute("""
-                SELECT DISTINCT client_name
-                FROM sales_entries
-                WHERE TRIM(team) = %s
-
-                UNION
-
-                SELECT DISTINCT client_name
-                FROM visit_entries
-                WHERE TRIM(team) = %s
-            """, (selected_team, selected_team))
-        else:
-            cur.execute("""
-                SELECT DISTINCT client_name
-                FROM sales_entries
-
-                UNION
-
-                SELECT DISTINCT client_name
-                FROM visit_entries
-            """)
-
-        clients = [r[0] for r in cur.fetchall() if r[0]]
         client = ""
-
         client_words = ["client", "clients", "customer", "customers", "party", "parties"]
         should_detect_client = any(word in q_lower for word in client_words)
 
         if should_detect_client:
+            if selected_team:
+                cur.execute("""
+                    SELECT DISTINCT client_name
+                    FROM sales_entries
+                    WHERE TRIM(team) = %s
+
+                    UNION
+
+                    SELECT DISTINCT client_name
+                    FROM visit_entries
+                    WHERE TRIM(team) = %s
+                """, (selected_team, selected_team))
+            else:
+                cur.execute("""
+                    SELECT DISTINCT client_name
+                    FROM sales_entries
+
+                    UNION
+
+                    SELECT DISTINCT client_name
+                    FROM visit_entries
+                """)
+
+            clients = [r[0] for r in cur.fetchall() if r[0]]
+
             for c in clients:
                 c_clean = str(c or "").strip()
                 if c_clean and c_clean.lower() in q_lower:
@@ -3869,15 +3888,12 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                     c_clean = str(c or "").strip()
                     parts = [p for p in c_clean.lower().split() if len(p) >= 5]
                     matched_parts = [p for p in parts if p in q_lower]
-
-                    # client tabhi detect karo jab kam az kam 2 strong words match hon
-                    # taake "Ali Khan" se "ALIYAN AHMED KHAN" client na ban jaye
                     if len(matched_parts) >= 2:
                         client = c_clean
                         break
 
         # -----------------------------
-        # 5) Team target type
+        # Team target type
         # -----------------------------
         team_target_type = "QTY"
 
@@ -3886,809 +3902,248 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 "SELECT COALESCE(target_type, 'QTY') FROM teams WHERE TRIM(name) = %s",
                 (selected_team,)
             )
-            team_row = cur.fetchone()
-            if team_row:
-                team_target_type = str(team_row[0] or "QTY").upper()
+            row = cur.fetchone()
+            if row:
+                team_target_type = str(row[0] or "QTY").upper()
 
         achieved_field = "amount" if team_target_type == "AMOUNT" else "quantity"
         unit = "Rs" if team_target_type == "AMOUNT" else "Qty"
 
         # -----------------------------
-        # 6) Sales filters
+        # Intent detection
         # -----------------------------
-        sales_filters = []
-        sales_params = []
+        wants_count = any(w in q_lower for w in ["how many", "count", "kitne", "kitni", "kitna"])
+        wants_salesperson_count = wants_count and any(w in q_lower for w in ["salesperson", "sales person", "salespersons", "sales persons"])
+        wants_client_count = wants_count and any(w in q_lower for w in ["client", "clients", "customer", "customers", "party", "parties"])
+        wants_product_count = wants_count and any(w in q_lower for w in ["product", "products"])
+        wants_team_count = wants_count and "team" in q_lower
 
-        if selected_team:
-            sales_filters.append("TRIM(team) = %s")
-            sales_params.append(selected_team)
-
-        if salesperson:
-            sales_filters.append("LOWER(TRIM(sales_person)) = LOWER(TRIM(%s))")
-            sales_params.append(salesperson)
-
-        if product:
-            sales_filters.append("LOWER(TRIM(product)) = LOWER(TRIM(%s))")
-            sales_params.append(product)
-
-        if client:
-            sales_filters.append("LOWER(TRIM(client_name)) = LOWER(TRIM(%s))")
-            sales_params.append(client)
-
-        sales_filters.append("year = %s")
-        sales_params.append(year)
-
-        if month:
-            sales_filters.append("month = %s")
-            sales_params.append(month)
-
-        sales_where_sql = " AND ".join(sales_filters) if sales_filters else "1=1"
-
-        # -----------------------------
-        # 7) Main sales summary
-        # -----------------------------
-        cur.execute(f"""
-            SELECT
-                COALESCE(SUM(quantity), 0) AS total_qty,
-                COALESCE(SUM(amount), 0) AS total_amount,
-                COUNT(*) AS total_entries,
-                COUNT(DISTINCT client_name) AS total_clients,
-                COUNT(DISTINCT product) AS total_products,
-                COUNT(DISTINCT sales_person) AS total_salespersons
-            FROM sales_entries
-            WHERE {sales_where_sql}
-        """, tuple(sales_params))
-
-        sales_row = cur.fetchone()
-
-        total_qty = float(sales_row[0] or 0)
-        total_amount = float(sales_row[1] or 0)
-        total_entries = int(sales_row[2] or 0)
-        total_clients = int(sales_row[3] or 0)
-        total_products = int(sales_row[4] or 0)
-        total_salespersons = int(sales_row[5] or 0)
-
-        achieved = total_amount if team_target_type == "AMOUNT" else total_qty
-
-        # -----------------------------
-        # 8) Product-wise sales
-        # -----------------------------
-        cur.execute(f"""
-            SELECT
-                product,
-                COALESCE(SUM(quantity), 0) AS total_qty,
-                COALESCE(SUM(amount), 0) AS total_amount,
-                COUNT(DISTINCT client_name) AS clients_count,
-                COUNT(DISTINCT sales_person) AS salespersons_count
-            FROM sales_entries
-            WHERE {sales_where_sql}
-            GROUP BY product
-            ORDER BY COALESCE(SUM({achieved_field}), 0) DESC
-        """, tuple(sales_params))
-
-        product_breakdown = [
-            {
-                "product": r[0],
-                "quantity": float(r[1] or 0),
-                "amount": float(r[2] or 0),
-                "clients_count": int(r[3] or 0),
-                "salespersons_count": int(r[4] or 0),
-            }
-            for r in cur.fetchall()
-        ]
-
-        # -----------------------------
-        # 9) Client-wise sales
-        # -----------------------------
-        cur.execute(f"""
-            SELECT
-                client_name,
-                COALESCE(SUM(quantity), 0) AS total_qty,
-                COALESCE(SUM(amount), 0) AS total_amount,
-                COUNT(DISTINCT product) AS products_count,
-                COUNT(DISTINCT sales_person) AS salespersons_count
-            FROM sales_entries
-            WHERE {sales_where_sql}
-            GROUP BY client_name
-            ORDER BY COALESCE(SUM({achieved_field}), 0) DESC
-        """, tuple(sales_params))
-
-        client_breakdown = [
-            {
-                "client_name": r[0],
-                "quantity": float(r[1] or 0),
-                "amount": float(r[2] or 0),
-                "products_count": int(r[3] or 0),
-                "salespersons_count": int(r[4] or 0),
-            }
-            for r in cur.fetchall()
-        ]
-
-        # -----------------------------
-        # 10) Salesperson-wise sales
-        # -----------------------------
-        cur.execute(f"""
-            SELECT
-                sales_person,
-                COALESCE(SUM(quantity), 0) AS total_qty,
-                COALESCE(SUM(amount), 0) AS total_amount,
-                COUNT(DISTINCT client_name) AS clients_count,
-                COUNT(DISTINCT product) AS products_count
-            FROM sales_entries
-            WHERE {sales_where_sql}
-            GROUP BY sales_person
-            ORDER BY COALESCE(SUM({achieved_field}), 0) DESC
-        """, tuple(sales_params))
-
-        salesperson_breakdown = [
-            {
-                "sales_person": r[0],
-                "quantity": float(r[1] or 0),
-                "amount": float(r[2] or 0),
-                "clients_count": int(r[3] or 0),
-                "products_count": int(r[4] or 0),
-            }
-            for r in cur.fetchall()
-        ]
-
-        # -----------------------------
-        # 11) Team-wise sales
-        # -----------------------------
-        cur.execute(f"""
-            SELECT
-                team,
-                COALESCE(SUM(quantity), 0) AS total_qty,
-                COALESCE(SUM(amount), 0) AS total_amount,
-                COUNT(DISTINCT sales_person) AS salespersons_count,
-                COUNT(DISTINCT client_name) AS clients_count,
-                COUNT(DISTINCT product) AS products_count
-            FROM sales_entries
-            WHERE {sales_where_sql}
-            GROUP BY team
-            ORDER BY COALESCE(SUM({achieved_field}), 0) DESC
-        """, tuple(sales_params))
-
-        team_breakdown = [
-            {
-                "team": r[0],
-                "quantity": float(r[1] or 0),
-                "amount": float(r[2] or 0),
-                "salespersons_count": int(r[3] or 0),
-                "clients_count": int(r[4] or 0),
-                "products_count": int(r[5] or 0),
-            }
-            for r in cur.fetchall()
-        ]
-
-        # -----------------------------
-        # 12) Visit filters
-        # -----------------------------
-        visit_filters = []
-        visit_params = []
-
-        if selected_team:
-            visit_filters.append("TRIM(team) = %s")
-            visit_params.append(selected_team)
-
-        if salesperson:
-            visit_filters.append("LOWER(TRIM(sales_person)) = LOWER(TRIM(%s))")
-            visit_params.append(salesperson)
-
-        if product:
-            visit_filters.append("LOWER(TRIM(product)) = LOWER(TRIM(%s))")
-            visit_params.append(product)
-
-        if client:
-            visit_filters.append("LOWER(TRIM(client_name)) = LOWER(TRIM(%s))")
-            visit_params.append(client)
-
-        visit_filters.append("EXTRACT(YEAR FROM meeting_date::date) = %s")
-        visit_params.append(year)
-
-        if month:
-            visit_filters.append("TO_CHAR(meeting_date::date, 'Mon') = %s")
-            visit_params.append(month)
-
-        visit_where = " AND ".join(visit_filters) if visit_filters else "1=1"
-
-        # -----------------------------
-        # 13) Visit summary
-        # -----------------------------
-        cur.execute(f"""
-            SELECT
-                COUNT(*) AS total_visits,
-                COUNT(DISTINCT client_name) AS visited_clients,
-                COUNT(DISTINCT sales_person) AS visiting_salespersons,
-                COALESCE(SUM(order_amount), 0) AS visit_order_amount,
-                COALESCE(SUM(quantity), 0) AS visit_quantity
-            FROM visit_entries
-            WHERE {visit_where}
-        """, tuple(visit_params))
-
-        visit_row = cur.fetchone()
-
-        total_visits = int(visit_row[0] or 0)
-        visited_clients = int(visit_row[1] or 0)
-        visiting_salespersons = int(visit_row[2] or 0)
-        visit_order_amount = float(visit_row[3] or 0)
-        visit_quantity = float(visit_row[4] or 0)
-        repeat_visits = max(0, total_visits - visited_clients)
-
-        # -----------------------------
-        # 14) Repeat client visit details
-        # -----------------------------
-        cur.execute(f"""
-            SELECT
-                client_name,
-                sales_person,
-                COUNT(*) AS visit_count,
-                COALESCE(SUM(order_amount), 0) AS total_order_amount,
-                COALESCE(SUM(quantity), 0) AS total_visit_quantity,
-                STRING_AGG(DISTINCT meeting_status, ', ') AS statuses,
-                STRING_AGG(DISTINCT client_response, ', ') AS responses
-            FROM visit_entries
-            WHERE {visit_where}
-            GROUP BY client_name, sales_person
-            HAVING COUNT(*) > 1
-            ORDER BY COUNT(*) DESC, client_name
-        """, tuple(visit_params))
-
-        repeat_clients = [
-            {
-                "client_name": r[0],
-                "sales_person": r[1],
-                "visit_count": int(r[2] or 0),
-                "order_amount": float(r[3] or 0),
-                "quantity": float(r[4] or 0),
-                "statuses": r[5] or "",
-                "responses": r[6] or "",
-            }
-            for r in cur.fetchall()
-        ]
-
-                # -----------------------------
-        # 14B) On-call / on-phone notes based visits
-        # -----------------------------
-        cur.execute(f"""
-            SELECT
-                sales_person,
-                COUNT(*) AS call_phone_visits,
-                COUNT(DISTINCT client_name) AS clients_count,
-                COALESCE(SUM(order_amount), 0) AS total_order_amount,
-                COALESCE(SUM(quantity), 0) AS total_quantity,
-                STRING_AGG(DISTINCT client_name, ', ') AS clients
-            FROM visit_entries
-            WHERE {visit_where}
-              AND (
-                    LOWER(COALESCE(notes, '')) LIKE '%%call%%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%%phone%%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%%on call%%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%%on phone%%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%%telephonic%%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%%whatsapp call%%'
-
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%%call%%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%%phone%%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%%on call%%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%%on phone%%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%%telephonic%%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%%whatsapp call%%'
-
-                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%%call%%'
-                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%%phone%%'
-              )
-            GROUP BY sales_person
-            ORDER BY COUNT(*) DESC
-            LIMIT 10
-        """, tuple(visit_params))
-
-        call_phone_top = [
-            {
-                "sales_person": r[0],
-                "call_phone_visits": int(r[1] or 0),
-                "clients_count": int(r[2] or 0),
-                "order_amount": float(r[3] or 0),
-                "quantity": float(r[4] or 0),
-                "clients": r[5] or "",
-            }
-            for r in cur.fetchall()
-        ]
-
-        cur.execute(f"""
-            SELECT
-                sales_person,
-                client_name,
-                product,
-                meeting_date,
-                meeting_status,
-                client_response,
-                notes,
-                COALESCE(order_amount, 0) AS order_amount,
-                COALESCE(quantity, 0) AS quantity
-            FROM visit_entries
-            WHERE {visit_where}
-              AND (
-                    LOWER(COALESCE(notes, '')) LIKE '%%call%%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%%phone%%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%%on call%%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%%on phone%%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%%telephonic%%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%%whatsapp call%%'
-
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%%call%%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%%phone%%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%%on call%%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%%on phone%%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%%telephonic%%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%%whatsapp call%%'
-
-                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%%call%%'
-                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%%phone%%'
-              )
-            ORDER BY meeting_date DESC, sales_person, client_name
-            LIMIT 50
-        """, tuple(visit_params))
-
-        call_phone_details = [
-            {
-                "sales_person": r[0],
-                "client_name": r[1],
-                "product": r[2],
-                "meeting_date": str(r[3] or ""),
-                "meeting_status": r[4] or "",
-                "client_response": r[5] or "",
-                "notes": r[6] or "",
-                "order_amount": float(r[7] or 0),
-                "quantity": float(r[8] or 0),
-            }
-            for r in cur.fetchall()
-        ]
-
-        # -----------------------------
-        # 15) Suspicious / fake visit audit
-        # -----------------------------
-        audit_sales_filters = []
-        audit_sales_params = []
-
-        if selected_team:
-            audit_sales_filters.append("TRIM(team) = %s")
-            audit_sales_params.append(selected_team)
-
-        if salesperson:
-            audit_sales_filters.append("LOWER(TRIM(sales_person)) = LOWER(TRIM(%s))")
-            audit_sales_params.append(salesperson)
-
-        if product:
-            audit_sales_filters.append("LOWER(TRIM(product)) = LOWER(TRIM(%s))")
-            audit_sales_params.append(product)
-
-        if client:
-            audit_sales_filters.append("LOWER(TRIM(client_name)) = LOWER(TRIM(%s))")
-            audit_sales_params.append(client)
-
-        audit_sales_filters.append("year = %s")
-        audit_sales_params.append(year)
-
-        if month:
-            audit_sales_filters.append("month = %s")
-            audit_sales_params.append(month)
-
-        audit_sales_where = " AND ".join(audit_sales_filters) if audit_sales_filters else "1=1"
-
-        cur.execute(f"""
-            WITH visit_group AS (
-                SELECT
-                    sales_person,
-                    client_name,
-                    product,
-                    COUNT(*) AS visit_count,
-                    COALESCE(SUM(order_amount), 0) AS visit_order_amount,
-                    COALESCE(SUM(quantity), 0) AS visit_quantity,
-                    STRING_AGG(DISTINCT meeting_status, ', ') AS statuses,
-                    STRING_AGG(DISTINCT client_response, ', ') AS responses
-                FROM visit_entries
-                WHERE {visit_where}
-                GROUP BY sales_person, client_name, product
-            ),
-            sales_group AS (
-                SELECT
-                    sales_person,
-                    client_name,
-                    product,
-                    COALESCE(SUM(quantity), 0) AS sales_qty,
-                    COALESCE(SUM(amount), 0) AS sales_amount
-                FROM sales_entries
-                WHERE {audit_sales_where}
-                GROUP BY sales_person, client_name, product
-            )
-            SELECT
-                vg.sales_person,
-                vg.client_name,
-                vg.product,
-                vg.visit_count,
-                vg.visit_order_amount,
-                vg.visit_quantity,
-                vg.statuses,
-                vg.responses,
-                COALESCE(sg.sales_qty, 0) AS sales_qty,
-                COALESCE(sg.sales_amount, 0) AS sales_amount
-            FROM visit_group vg
-            LEFT JOIN sales_group sg
-                ON LOWER(TRIM(vg.sales_person)) = LOWER(TRIM(sg.sales_person))
-               AND LOWER(TRIM(vg.client_name)) = LOWER(TRIM(sg.client_name))
-               AND LOWER(TRIM(vg.product)) = LOWER(TRIM(sg.product))
-            WHERE
-                (
-                    vg.visit_count >= 2
-                    AND COALESCE(sg.sales_qty, 0) = 0
-                    AND COALESCE(sg.sales_amount, 0) = 0
-                )
-                OR
-                (
-                    vg.visit_count >= 3
-                    AND vg.visit_order_amount = 0
-                )
-            ORDER BY vg.visit_count DESC, vg.client_name
-            LIMIT 50
-        """, tuple(visit_params + audit_sales_params))
-
-        suspicious_visits = [
-            {
-                "sales_person": r[0],
-                "client_name": r[1],
-                "product": r[2],
-                "visit_count": int(r[3] or 0),
-                "visit_order_amount": float(r[4] or 0),
-                "visit_quantity": float(r[5] or 0),
-                "statuses": r[6] or "",
-                "responses": r[7] or "",
-                "sales_qty": float(r[8] or 0),
-                "sales_amount": float(r[9] or 0),
-                "reason": "Repeat visits but no matching sales/order found",
-            }
-            for r in cur.fetchall()
-        ]
-
-        # -----------------------------
-        # 16) Target vs achieved
-        # -----------------------------
-        target_value = 0.0
-
-        if selected_team:
-            if team_target_type == "AMOUNT":
-                target_expr = """
-                    CASE
-                        WHEN COALESCE(target_type, 'QTY') = 'AMOUNT'
-                            THEN COALESCE(target_value, 0)
-                        ELSE 0
-                    END
-                """
-            else:
-                target_expr = """
-                    CASE
-                        WHEN COALESCE(target_type, 'QTY') = 'QTY'
-                            THEN COALESCE(NULLIF(target_value, 0), target_kg, 0)
-                        ELSE 0
-                    END
-                """
-
-            target_filters = ["TRIM(team) = %s", "target_year = %s"]
-            target_params = [selected_team, year]
-
-            if salesperson:
-                target_filters.append("LOWER(TRIM(username)) = LOWER(TRIM(%s))")
-                target_params.append(salesperson)
-
-            if month:
-                target_filters.append("target_month = %s")
-                target_params.append(month)
-
-            target_where = " AND ".join(target_filters)
-
-            cur.execute(f"""
-                SELECT COALESCE(SUM({target_expr}), 0)
-                FROM sales_targets
-                WHERE {target_where}
-            """, tuple(target_params))
-
-            target_value = float(cur.fetchone()[0] or 0)
-
-        percent = (achieved / target_value * 100) if target_value else 0
-        remaining = target_value - achieved
-
-        direction = "target set nahi hai, is liye direction judge nahi ho sakti"
-        if target_value:
-            if percent < 50:
-                direction = "weak hai, follow-up aur conversion improve karni hogi"
-            elif percent < 80:
-                direction = "average hai, target cover karne ke liye push chahiye"
-            else:
-                direction = "sahi direction me hai"
-
-        # -----------------------------
-        # 17) Build answer based on question type
-        # -----------------------------
-        wants_visit_audit = any(word in q_lower for word in ["fake", "audit", "suspicious", "jhooti", "jhoot", "verify", "verification"])
-        wants_call_phone = any(word in q_lower for word in ["call", "phone", "on call", "on phone", "telephonic", "whatsapp call"])
+        wants_visit_audit = any(w in q_lower for w in ["fake", "audit", "suspicious", "jhooti", "jhoot", "verify", "verification"])
+        wants_call_phone = any(w in q_lower for w in ["call", "phone", "on call", "on phone", "telephonic", "whatsapp call"])
         wants_visit = "visit" in q_lower or "visits" in q_lower
-        wants_product = "product" in q_lower or "products" in q_lower or "kon kon si" in q_lower
-        wants_client = "client" in q_lower or "clients" in q_lower or "customer" in q_lower
-        wants_target = "target" in q_lower or "progress" in q_lower or "direction" in q_lower or "achievement" in q_lower
+        wants_product = "product" in q_lower or "products" in q_lower or "kon kon si" in q_lower or bool(product)
+        wants_client = any(w in q_lower for w in ["client", "clients", "customer", "customers", "party", "parties"]) or bool(client)
+        wants_target = any(w in q_lower for w in ["target", "progress", "direction", "achievement", "remaining", "short"])
         wants_team = "team" in q_lower
-        wants_amount = "amount" in q_lower or "rs" in q_lower or "rupees" in q_lower or "pkr" in q_lower
 
-        period_text = f"{month} {year}" if month else f"Full Year {year}"
-
-        wants_comparison = any(word in q_lower for word in ["compare", "comparison", "vs", "versus", "last year", "previous year"])
-
-        if wants_comparison and comparison_data:
-            lines = []
-            for item in comparison_data:
-                lines.append(
-                    f"{item['year']}: Qty {item['total_qty']:,.0f}, "
-                    f"Amount Rs {item['total_amount']:,.0f}, "
-                    f"Clients {item['clients_count']}, Products {item['products_count']}"
-                )
-
-            growth_text = ""
-            if len(comparison_data) >= 2:
-                old = comparison_data[0]
-                new = comparison_data[-1]
-
-                qty_diff = new["total_qty"] - old["total_qty"]
-                amount_diff = new["total_amount"] - old["total_amount"]
-
-                qty_growth = (qty_diff / old["total_qty"] * 100) if old["total_qty"] else 0
-                amount_growth = (amount_diff / old["total_amount"] * 100) if old["total_amount"] else 0
-
-                growth_text = (
-                    f"\n\nGrowth:\n"
-                    f"Qty Difference: {qty_diff:,.0f} ({qty_growth:.1f}%)\n"
-                    f"Amount Difference: Rs {amount_diff:,.0f} ({amount_growth:.1f}%)"
-                )
-
-            answer = (
-                f"Comparison report for {month or 'Full Year'}:\n\n"
-                + "\n".join(lines)
-                + growth_text
-            )
-
-        elif wants_call_phone:
-            if call_phone_top:
-                top_lines = []
-                for item in call_phone_top:
-                    top_lines.append(
-                        f"- {item['sales_person']}: {item['call_phone_visits']} call/phone notes, "
-                        f"Clients {item['clients_count']}, Order Rs {item['order_amount']:,.0f}, "
-                        f"Qty {item['quantity']:,.0f}"
-                    )
-
-                detail_lines = []
-                for item in call_phone_details[:20]:
-                    note_text = item["notes"] or item["client_response"] or item["meeting_status"]
-                    note_text = str(note_text).strip()
-                    if len(note_text) > 80:
-                        note_text = note_text[:80] + "..."
-
-                    detail_lines.append(
-                        f"- {item['sales_person']} | {item['client_name']} | {item['product']} | "
-                        f"{item['meeting_date']}: {note_text}"
-                    )
-
-                answer = (
-                    f"On-call / on-phone notes report {period_text}:\n\n"
-                    f"Top salespersons:\n"
-                    + "\n".join(top_lines)
-                    + "\n\nRecent/details:\n"
-                    + ("\n".join(detail_lines) if detail_lines else "Detail notes nahi mili.")
-                    + "\n\nNote: Ye report notes/client response/status ke text se detect hui hai."
-                )
-            else:
-                answer = (
-                    f"{period_text} me notes/client response/status ke andar "
-                    f"call/phone/on-call/on-phone ka record nahi mila."
-                )
-
-        elif wants_visit_audit:        
-            if suspicious_visits:
-                lines = []
-                for item in suspicious_visits:
-                    lines.append(
-                        f"- {item['sales_person']} | {item['client_name']} | {item['product']}: "
-                        f"{item['visit_count']} visits, Sales {item['sales_qty']:,.0f} Qty, "
-                        f"Order Rs {item['visit_order_amount']:,.0f}. "
-                        f"Reason: {item['reason']}"
-                    )
-
-                answer = (
-                    f"Visit audit {period_text}:\n\n"
-                    f"Total visits: {total_visits}\n"
-                    f"Clients visited: {visited_clients}\n"
-                    f"Suspicious / verification required cases: {len(suspicious_visits)}\n\n"
-                    f"Details:\n"
-                    + "\n".join(lines)
-                    + "\n\nNote: Main fake confirm nahi keh raha, lekin ye cases manager verification ke liye suspicious hain."
-                )
-            else:
-                answer = (
-                    f"Visit audit {period_text}:\n\n"
-                    f"Total visits: {total_visits}\n"
-                    f"Clients visited: {visited_clients}\n"
-                    f"Suspicious / verification required cases: 0\n\n"
-                    f"Is filter me obvious fake/repeat-without-sale pattern nahi mila."
-                )
-
-        elif wants_product:
-            if product and not salesperson:
-                lines = []
-                for item in salesperson_breakdown:
-                    lines.append(
-                        f"- {item['sales_person']}: {item['quantity']:,.0f} Qty, Rs {item['amount']:,.0f}, "
-                        f"Clients {item['clients_count']}"
-                    )
-
-                answer = (
-                    f"{product} ki {period_text} total sale:\n"
-                    f"Total Qty: {total_qty:,.0f}\n"
-                    f"Total Amount: Rs {total_amount:,.0f}\n"
-                    f"Clients: {total_clients}\n"
-                    f"Salespersons: {total_salespersons}\n\n"
-                    f"Salesperson-wise details:\n"
-                    + ("\n".join(lines) if lines else "Data nahi mili.")
-                )
-            else:
-                lines = []
-                for item in product_breakdown:
-                    lines.append(
-                        f"{item['product']}: {item['quantity']:,.0f} Qty "
-                        f"(Rs {item['amount']:,.0f})"
-                    )
-
-                who_text = salesperson if salesperson else (selected_team if selected_team else "Overall")
-
-                answer = (
-                    f"{who_text} ki {period_text} product-wise sale:\n"
-                    f"Total Qty: {total_qty:,.0f}\n"
-                    f"Total Amount: Rs {total_amount:,.0f}\n\n"
-                    f"Sari product-wise details:\n"
-                    + ("\n".join([f"{i+1}. {line}" for i, line in enumerate(lines)]) if lines else "Product-wise data nahi mili.")
-                    + f"\n\nTotal products sold: {len(product_breakdown)}"
-                )
-
-        elif wants_client:
-            lines = []
-            for item in client_breakdown:
-                lines.append(
-                    f"{item['client_name']}: {item['quantity']:,.0f} Qty "
-                    f"(Rs {item['amount']:,.0f}), Products {item['products_count']}"
-                )
-
-            who_text = salesperson if salesperson else (product if product else (selected_team if selected_team else "Overall"))
-
-            answer = (
-                f"{who_text} ki {period_text} client-wise sale:\n"
-                f"Total Qty: {total_qty:,.0f}\n"
-                f"Total Amount: Rs {total_amount:,.0f}\n"
-                f"Total Clients: {total_clients}\n\n"
-                f"Client-wise details:\n"
-                + ("\n".join([f"{i+1}. {line}" for i, line in enumerate(lines)]) if lines else "Client-wise data nahi mili.")
-            )
-
-        elif wants_visit:
-            repeat_lines = []
-            for item in repeat_clients:
-                repeat_lines.append(
-                    f"- {item['sales_person']} | {item['client_name']}: {item['visit_count']} visits, "
-                    f"Order Rs {item['order_amount']:,.0f}, Qty {item['quantity']:,.0f}"
-                )
-
-            suspicious_lines = []
-            for item in suspicious_visits[:10]:
-                suspicious_lines.append(
-                    f"- {item['sales_person']} | {item['client_name']} | {item['product']}: "
-                    f"{item['visit_count']} visits, Sales {item['sales_qty']:,.0f} Qty"
-                )
-
-            who_text = salesperson if salesperson else (selected_team if selected_team else "Overall")
-
-            answer = (
-                f"{who_text} ka {period_text} visits result:\n\n"
-                f"Total Visits: {total_visits}\n"
-                f"Clients Visited: {visited_clients}\n"
-                f"Repeat Visits: {repeat_visits}\n"
-                f"Visit Order Amount: Rs {visit_order_amount:,.0f}\n"
-                f"Visit Quantity: {visit_quantity:,.0f}\n\n"
-                f"Repeat clients:\n"
-                + ("\n".join(repeat_lines) if repeat_lines else "Repeat client detail nahi mili.")
-                + "\n\nSuspicious / verification required:\n"
-                + ("\n".join(suspicious_lines) if suspicious_lines else "Koi obvious suspicious visit pattern nahi mila.")
-            )
-
-        elif wants_target or wants_team or wants_amount:
-            if salesperson_breakdown and not salesperson:
-                lines = []
-                for item in salesperson_breakdown:
-                    lines.append(
-                        f"- {item['sales_person']}: {item['quantity']:,.0f} Qty, Rs {item['amount']:,.0f}, "
-                        f"Clients {item['clients_count']}, Products {item['products_count']}"
-                    )
-
-                answer = (
-                    f"{selected_team or 'Overall'} ka {period_text} performance:\n"
-                    f"Total Qty: {total_qty:,.0f}\n"
-                    f"Total Amount: Rs {total_amount:,.0f}\n"
-                    f"Target: {target_value:,.0f} {unit}\n"
-                    f"Achievement: {percent:.1f}%\n"
-                    f"Remaining: {remaining:,.0f} {unit}\n\n"
-                    f"Salesperson-wise details:\n"
-                    + "\n".join(lines)
-                )
-            else:
-                who_text = salesperson if salesperson else (selected_team if selected_team else "Overall")
-
-                answer = (
-                    f"{who_text} ka {period_text} performance:\n"
-                    f"Achieved Qty: {total_qty:,.0f}\n"
-                    f"Achieved Amount: Rs {total_amount:,.0f}\n"
-                    f"Target: {target_value:,.0f} {unit}\n"
-                    f"Achievement: {percent:.1f}%\n"
-                    f"Remaining: {remaining:,.0f} {unit}\n"
-                    f"Sales Entries: {total_entries}\n"
-                    f"Clients: {total_clients}\n"
-                    f"Products: {total_products}\n"
-                    f"Visits: {total_visits}\n"
-                    f"Clients Visited: {visited_clients}\n\n"
-                    f"Direction: {direction}."
-                )
-
-        else:
-            who_text = salesperson or product or client or selected_team or "Overall"
-
-            answer = (
-                f"{who_text} ka {period_text} summary:\n"
-                f"Total Qty: {total_qty:,.0f}\n"
-                f"Total Amount: Rs {total_amount:,.0f}\n"
-                f"Sales Entries: {total_entries}\n"
-                f"Clients: {total_clients}\n"
-                f"Products: {total_products}\n"
-                f"Salespersons: {total_salespersons}\n"
-                f"Visits: {total_visits}\n"
-                f"Clients Visited: {visited_clients}\n"
-                f"Target: {target_value:,.0f} {unit}\n"
-                f"Achievement: {percent:.1f}%\n\n"
-                f"Direction: {direction}."
-            )
-
-        comparison_data = []
-
-        if len(compare_years) > 1:
-            comp_filters = []
-            comp_params = []
+        # -----------------------------
+        # Helper filters
+        # -----------------------------
+        def sales_filter(include_year=True, use_compare_years=False):
+            filters = []
+            params = []
 
             if selected_team:
-                comp_filters.append("TRIM(team) = %s")
-                comp_params.append(selected_team)
+                filters.append("TRIM(team) = %s")
+                params.append(selected_team)
 
             if salesperson:
-                comp_filters.append("LOWER(TRIM(sales_person)) = LOWER(TRIM(%s))")
-                comp_params.append(salesperson)
+                filters.append("LOWER(TRIM(sales_person)) = LOWER(TRIM(%s))")
+                params.append(salesperson)
 
             if product:
-                comp_filters.append("LOWER(TRIM(product)) = LOWER(TRIM(%s))")
-                comp_params.append(product)
+                filters.append("LOWER(TRIM(product)) = LOWER(TRIM(%s))")
+                params.append(product)
 
             if client:
-                comp_filters.append("LOWER(TRIM(client_name)) = LOWER(TRIM(%s))")
-                comp_params.append(client)
+                filters.append("LOWER(TRIM(client_name)) = LOWER(TRIM(%s))")
+                params.append(client)
+
+            if include_year:
+                if use_compare_years:
+                    filters.append("year = ANY(%s)")
+                    params.append(compare_years)
+                else:
+                    filters.append("year = %s")
+                    params.append(year)
 
             if month:
-                comp_filters.append("month = %s")
-                comp_params.append(month)
+                filters.append("month = %s")
+                params.append(month)
 
-            comp_filters.append("year = ANY(%s)")
-            comp_params.append(compare_years)
+            return (" AND ".join(filters) if filters else "1=1", params)
 
-            comp_where = " AND ".join(comp_filters)
+        def visit_filter():
+            filters = []
+            params = []
+
+            if selected_team:
+                filters.append("TRIM(team) = %s")
+                params.append(selected_team)
+
+            if salesperson:
+                filters.append("LOWER(TRIM(sales_person)) = LOWER(TRIM(%s))")
+                params.append(salesperson)
+
+            if product:
+                filters.append("LOWER(TRIM(product)) = LOWER(TRIM(%s))")
+                params.append(product)
+
+            if client:
+                filters.append("LOWER(TRIM(client_name)) = LOWER(TRIM(%s))")
+                params.append(client)
+
+            filters.append("LEFT(meeting_date, 4) = %s")
+            params.append(str(year))
+
+            if month and month in month_num_map:
+                filters.append("SUBSTRING(meeting_date, 6, 2) = %s")
+                params.append(month_num_map[month])
+
+            return (" AND ".join(filters) if filters else "1=1", params)
+
+        sales_where, sales_params = sales_filter()
+        visit_where, visit_params = visit_filter()
+
+        # -----------------------------
+        # 1) Small count answers
+        # -----------------------------
+        if wants_salesperson_count:
+            user_filters = ["COALESCE(TRIM(team), '') <> ''", "COALESCE(role, '') <> 'admin'"]
+            user_params = []
+
+            if selected_team:
+                user_filters.append("TRIM(team) = %s")
+                user_params.append(selected_team)
+
+            user_where = " AND ".join(user_filters)
+
+            cur.execute(f"""
+                SELECT COUNT(DISTINCT username)
+                FROM users
+                WHERE {user_where}
+            """, tuple(user_params))
+            registered_count = int(cur.fetchone()[0] or 0)
+
+            cur.execute(f"""
+                SELECT COUNT(DISTINCT sales_person)
+                FROM sales_entries
+                WHERE {sales_where}
+            """, tuple(sales_params))
+            sales_data_count = int(cur.fetchone()[0] or 0)
+
+            cur.execute(f"""
+                SELECT COUNT(DISTINCT sales_person)
+                FROM visit_entries
+                WHERE {visit_where}
+            """, tuple(visit_params))
+            visit_data_count = int(cur.fetchone()[0] or 0)
+
+            answer = reply(
+                f"Salesperson count:\n"
+                f"Registered sales users: {registered_count}\n"
+                f"Salespersons with sales data in {period_text_en}: {sales_data_count}\n"
+                f"Salespersons with visit data in {period_text_en}: {visit_data_count}",
+                f"Salespersons count:\n"
+                f"Registered sales users: {registered_count}\n"
+                f"{period_text_ru} sales data wale salespersons: {sales_data_count}\n"
+                f"{period_text_ru} visit data wale salespersons: {visit_data_count}"
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "salesperson_count",
+                    "team": selected_team,
+                    "period": period_text_en,
+                    "registered_sales_users": registered_count,
+                    "salespersons_with_sales_data": sales_data_count,
+                    "salespersons_with_visit_data": visit_data_count,
+                },
+            }
+
+        if wants_client_count:
+            cur.execute(f"""
+                SELECT COUNT(DISTINCT client_name)
+                FROM sales_entries
+                WHERE {sales_where}
+            """, tuple(sales_params))
+            sales_clients = int(cur.fetchone()[0] or 0)
+
+            cur.execute(f"""
+                SELECT COUNT(DISTINCT client_name)
+                FROM visit_entries
+                WHERE {visit_where}
+            """, tuple(visit_params))
+            visit_clients = int(cur.fetchone()[0] or 0)
+
+            answer = reply(
+                f"Client count for {period_text_en}:\n"
+                f"Clients with sales: {sales_clients}\n"
+                f"Clients visited: {visit_clients}",
+                f"{period_text_ru} client count:\n"
+                f"Sales wale clients: {sales_clients}\n"
+                f"Visited clients: {visit_clients}"
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "client_count",
+                    "team": selected_team,
+                    "period": period_text_en,
+                    "clients_with_sales": sales_clients,
+                    "clients_visited": visit_clients,
+                },
+            }
+
+        if wants_product_count:
+            cur.execute(f"""
+                SELECT COUNT(DISTINCT product)
+                FROM sales_entries
+                WHERE {sales_where}
+            """, tuple(sales_params))
+            sales_products = int(cur.fetchone()[0] or 0)
+
+            cur.execute(f"""
+                SELECT COUNT(DISTINCT product)
+                FROM visit_entries
+                WHERE {visit_where}
+            """, tuple(visit_params))
+            visit_products = int(cur.fetchone()[0] or 0)
+
+            answer = reply(
+                f"Product count for {period_text_en}:\n"
+                f"Products sold: {sales_products}\n"
+                f"Products discussed in visits: {visit_products}",
+                f"{period_text_ru} product count:\n"
+                f"Sold products: {sales_products}\n"
+                f"Visit me discuss products: {visit_products}"
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "product_count",
+                    "team": selected_team,
+                    "period": period_text_en,
+                    "products_sold": sales_products,
+                    "products_in_visits": visit_products,
+                },
+            }
+
+        if wants_team_count:
+            cur.execute("SELECT COUNT(*) FROM teams")
+            team_count = int(cur.fetchone()[0] or 0)
+
+            answer = reply(
+                f"We have {team_count} teams.",
+                f"Hamare paas total {team_count} teams hain."
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "team_count",
+                    "teams": team_count,
+                },
+            }
+
+        # -----------------------------
+        # 2) Comparison answer
+        # -----------------------------
+        if wants_comparison:
+            comp_where, comp_params = sales_filter(use_compare_years=True)
 
             cur.execute(f"""
                 SELECT
@@ -4715,57 +4170,668 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 }
                 for r in cur.fetchall()
             ]
-        
-        context = {
-            "question": question,
-            "comparison": comparison_data,
-            "detected": {
+
+            lines_en = []
+            lines_ru = []
+
+            for item in comparison_data:
+                lines_en.append(
+                    f"{item['year']}: Qty {item['total_qty']:,.0f}, "
+                    f"Amount Rs {item['total_amount']:,.0f}, "
+                    f"Clients {item['clients_count']}, Products {item['products_count']}"
+                )
+                lines_ru.append(
+                    f"{item['year']}: Qty {item['total_qty']:,.0f}, "
+                    f"Amount Rs {item['total_amount']:,.0f}, "
+                    f"Clients {item['clients_count']}, Products {item['products_count']}"
+                )
+
+            growth_en = ""
+            growth_ru = ""
+
+            if len(comparison_data) >= 2:
+                old = comparison_data[0]
+                new = comparison_data[-1]
+
+                qty_diff = new["total_qty"] - old["total_qty"]
+                amount_diff = new["total_amount"] - old["total_amount"]
+
+                qty_growth = (qty_diff / old["total_qty"] * 100) if old["total_qty"] else 0
+                amount_growth = (amount_diff / old["total_amount"] * 100) if old["total_amount"] else 0
+
+                growth_en = (
+                    f"\n\nGrowth:\n"
+                    f"Qty Difference: {qty_diff:,.0f} ({qty_growth:.1f}%)\n"
+                    f"Amount Difference: Rs {amount_diff:,.0f} ({amount_growth:.1f}%)"
+                )
+
+                growth_ru = (
+                    f"\n\nGrowth:\n"
+                    f"Qty Difference: {qty_diff:,.0f} ({qty_growth:.1f}%)\n"
+                    f"Amount Difference: Rs {amount_diff:,.0f} ({amount_growth:.1f}%)"
+                )
+
+            answer = reply(
+                f"Comparison report for {month or 'Full Year'}:\n\n"
+                + ("\n".join(lines_en) if lines_en else "No comparison data found.")
+                + growth_en,
+                f"{month or 'Full Year'} comparison report:\n\n"
+                + ("\n".join(lines_ru) if lines_ru else "Comparison data nahi mila.")
+                + growth_ru
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "comparison",
+                    "team": selected_team,
+                    "salesperson": salesperson,
+                    "product": product,
+                    "client": client,
+                    "month": month or "Full Year",
+                    "years": compare_years,
+                    "comparison": comparison_data,
+                },
+            }
+
+        # -----------------------------
+        # 3) On-call / phone notes answer
+        # -----------------------------
+        if wants_call_phone:
+            call_terms = [
+                "%call%", "%phone%", "%on call%", "%on phone%",
+                "%telephonic%", "%whatsapp call%"
+            ]
+
+            cur.execute(f"""
+                SELECT
+                    sales_person,
+                    COUNT(*) AS call_phone_visits,
+                    COUNT(DISTINCT client_name) AS clients_count,
+                    COALESCE(SUM(order_amount), 0) AS order_amount,
+                    COALESCE(SUM(quantity), 0) AS quantity
+                FROM visit_entries
+                WHERE {visit_where}
+                  AND (
+                        LOWER(COALESCE(notes, '')) LIKE %s
+                     OR LOWER(COALESCE(notes, '')) LIKE %s
+                     OR LOWER(COALESCE(notes, '')) LIKE %s
+                     OR LOWER(COALESCE(notes, '')) LIKE %s
+                     OR LOWER(COALESCE(notes, '')) LIKE %s
+                     OR LOWER(COALESCE(notes, '')) LIKE %s
+                     OR LOWER(COALESCE(client_response, '')) LIKE %s
+                     OR LOWER(COALESCE(client_response, '')) LIKE %s
+                     OR LOWER(COALESCE(client_response, '')) LIKE %s
+                     OR LOWER(COALESCE(client_response, '')) LIKE %s
+                     OR LOWER(COALESCE(client_response, '')) LIKE %s
+                     OR LOWER(COALESCE(client_response, '')) LIKE %s
+                     OR LOWER(COALESCE(meeting_status, '')) LIKE %s
+                     OR LOWER(COALESCE(meeting_status, '')) LIKE %s
+                  )
+                GROUP BY sales_person
+                ORDER BY COUNT(*) DESC
+                LIMIT 10
+            """, tuple(visit_params + call_terms + call_terms + ["%call%", "%phone%"]))
+
+            call_phone_top = [
+                {
+                    "sales_person": r[0],
+                    "call_phone_visits": int(r[1] or 0),
+                    "clients_count": int(r[2] or 0),
+                    "order_amount": float(r[3] or 0),
+                    "quantity": float(r[4] or 0),
+                }
+                for r in cur.fetchall()
+            ]
+
+            if call_phone_top:
+                lines = []
+                for item in call_phone_top:
+                    lines.append(
+                        f"- {item['sales_person']}: {item['call_phone_visits']} call/phone notes, "
+                        f"Clients {item['clients_count']}, Order Rs {item['order_amount']:,.0f}, "
+                        f"Qty {item['quantity']:,.0f}"
+                    )
+
+                answer = reply(
+                    f"Top on-call/on-phone salespersons for {period_text_en}:\n\n" + "\n".join(lines),
+                    f"{period_text_ru} me top on-call/on-phone salespersons:\n\n" + "\n".join(lines)
+                )
+            else:
+                answer = reply(
+                    f"No call/phone notes found for {period_text_en}.",
+                    f"{period_text_ru} me call/phone notes nahi mile."
+                )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "call_phone_report",
+                    "team": selected_team,
+                    "period": period_text_en,
+                    "top": call_phone_top,
+                },
+            }
+
+        # -----------------------------
+        # 4) Visit audit / suspicious visits
+        # -----------------------------
+        if wants_visit_audit:
+            audit_sales_where, audit_sales_params = sales_filter()
+
+            cur.execute(f"""
+                WITH visit_group AS (
+                    SELECT
+                        sales_person,
+                        client_name,
+                        product,
+                        COUNT(*) AS visit_count,
+                        COALESCE(SUM(order_amount), 0) AS visit_order_amount,
+                        COALESCE(SUM(quantity), 0) AS visit_quantity
+                    FROM visit_entries
+                    WHERE {visit_where}
+                    GROUP BY sales_person, client_name, product
+                ),
+                sales_group AS (
+                    SELECT
+                        sales_person,
+                        client_name,
+                        product,
+                        COALESCE(SUM(quantity), 0) AS sales_qty,
+                        COALESCE(SUM(amount), 0) AS sales_amount
+                    FROM sales_entries
+                    WHERE {audit_sales_where}
+                    GROUP BY sales_person, client_name, product
+                )
+                SELECT
+                    vg.sales_person,
+                    vg.client_name,
+                    vg.product,
+                    vg.visit_count,
+                    vg.visit_order_amount,
+                    vg.visit_quantity,
+                    COALESCE(sg.sales_qty, 0) AS sales_qty,
+                    COALESCE(sg.sales_amount, 0) AS sales_amount
+                FROM visit_group vg
+                LEFT JOIN sales_group sg
+                    ON LOWER(TRIM(vg.sales_person)) = LOWER(TRIM(sg.sales_person))
+                   AND LOWER(TRIM(vg.client_name)) = LOWER(TRIM(sg.client_name))
+                   AND LOWER(TRIM(vg.product)) = LOWER(TRIM(sg.product))
+                WHERE
+                    (
+                        vg.visit_count >= 2
+                        AND COALESCE(sg.sales_qty, 0) = 0
+                        AND COALESCE(sg.sales_amount, 0) = 0
+                    )
+                    OR
+                    (
+                        vg.visit_count >= 3
+                        AND vg.visit_order_amount = 0
+                    )
+                ORDER BY vg.visit_count DESC, vg.client_name
+                LIMIT 25
+            """, tuple(visit_params + audit_sales_params))
+
+            suspicious = [
+                {
+                    "sales_person": r[0],
+                    "client_name": r[1],
+                    "product": r[2],
+                    "visit_count": int(r[3] or 0),
+                    "visit_order_amount": float(r[4] or 0),
+                    "visit_quantity": float(r[5] or 0),
+                    "sales_qty": float(r[6] or 0),
+                    "sales_amount": float(r[7] or 0),
+                    "reason": "Repeat visits but no matching sales/order found",
+                }
+                for r in cur.fetchall()
+            ]
+
+            if suspicious:
+                lines = []
+                for item in suspicious:
+                    lines.append(
+                        f"- {item['sales_person']} | {item['client_name']} | {item['product']}: "
+                        f"{item['visit_count']} visits, Sales {item['sales_qty']:,.0f} Qty, "
+                        f"Order Rs {item['visit_order_amount']:,.0f}"
+                    )
+
+                answer = reply(
+                    f"Visit audit for {period_text_en}:\n\n"
+                    f"Suspicious / verification required cases: {len(suspicious)}\n\n"
+                    + "\n".join(lines)
+                    + "\n\nNote: These are not confirmed fake visits; they need manager verification.",
+                    f"{period_text_ru} visit audit:\n\n"
+                    f"Suspicious / verification required cases: {len(suspicious)}\n\n"
+                    + "\n".join(lines)
+                    + "\n\nNote: Ye confirmed fake nahi, manager verification required hai."
+                )
+            else:
+                answer = reply(
+                    f"No obvious suspicious visit pattern found for {period_text_en}.",
+                    f"{period_text_ru} me koi obvious suspicious visit pattern nahi mila."
+                )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "visit_audit",
+                    "team": selected_team,
+                    "period": period_text_en,
+                    "suspicious_visits": suspicious,
+                },
+            }
+
+        # -----------------------------
+        # 5) Visit summary
+        # -----------------------------
+        if wants_visit:
+            cur.execute(f"""
+                SELECT
+                    COUNT(*) AS total_visits,
+                    COUNT(DISTINCT client_name) AS visited_clients,
+                    COUNT(DISTINCT sales_person) AS visiting_salespersons,
+                    COALESCE(SUM(order_amount), 0) AS order_amount,
+                    COALESCE(SUM(quantity), 0) AS quantity
+                FROM visit_entries
+                WHERE {visit_where}
+            """, tuple(visit_params))
+
+            r = cur.fetchone()
+            total_visits = int(r[0] or 0)
+            visited_clients = int(r[1] or 0)
+            visiting_salespersons = int(r[2] or 0)
+            order_amount = float(r[3] or 0)
+            quantity = float(r[4] or 0)
+
+            cur.execute(f"""
+                SELECT sales_person, COUNT(*) AS visits, COUNT(DISTINCT client_name) AS clients
+                FROM visit_entries
+                WHERE {visit_where}
+                GROUP BY sales_person
+                ORDER BY COUNT(*) DESC
+                LIMIT 10
+            """, tuple(visit_params))
+
+            top_visitors = [
+                {
+                    "sales_person": x[0],
+                    "visits": int(x[1] or 0),
+                    "clients": int(x[2] or 0),
+                }
+                for x in cur.fetchall()
+            ]
+
+            lines = [f"- {x['sales_person']}: {x['visits']} visits, Clients {x['clients']}" for x in top_visitors]
+
+            answer = reply(
+                f"Visit summary for {period_text_en}:\n"
+                f"Total Visits: {total_visits}\n"
+                f"Clients Visited: {visited_clients}\n"
+                f"Salespersons: {visiting_salespersons}\n"
+                f"Visit Order Amount: Rs {order_amount:,.0f}\n"
+                f"Visit Quantity: {quantity:,.0f}\n\n"
+                f"Top visitors:\n" + ("\n".join(lines) if lines else "No visit data found."),
+                f"{period_text_ru} visit summary:\n"
+                f"Total Visits: {total_visits}\n"
+                f"Clients Visited: {visited_clients}\n"
+                f"Salespersons: {visiting_salespersons}\n"
+                f"Visit Order Amount: Rs {order_amount:,.0f}\n"
+                f"Visit Quantity: {quantity:,.0f}\n\n"
+                f"Top visitors:\n" + ("\n".join(lines) if lines else "Visit data nahi mila.")
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "visit_summary",
+                    "team": selected_team,
+                    "salesperson": salesperson,
+                    "period": period_text_en,
+                    "total_visits": total_visits,
+                    "visited_clients": visited_clients,
+                    "visiting_salespersons": visiting_salespersons,
+                    "order_amount": order_amount,
+                    "quantity": quantity,
+                    "top_visitors": top_visitors,
+                },
+            }
+
+        # -----------------------------
+        # 6) Product-wise sales
+        # -----------------------------
+        if wants_product:
+            cur.execute(f"""
+                SELECT
+                    product,
+                    COALESCE(SUM(quantity), 0) AS total_qty,
+                    COALESCE(SUM(amount), 0) AS total_amount,
+                    COUNT(DISTINCT client_name) AS clients_count,
+                    COUNT(DISTINCT sales_person) AS salespersons_count
+                FROM sales_entries
+                WHERE {sales_where}
+                GROUP BY product
+                ORDER BY COALESCE(SUM({achieved_field}), 0) DESC
+                LIMIT 100
+            """, tuple(sales_params))
+
+            product_data = [
+                {
+                    "product": r[0],
+                    "quantity": float(r[1] or 0),
+                    "amount": float(r[2] or 0),
+                    "clients_count": int(r[3] or 0),
+                    "salespersons_count": int(r[4] or 0),
+                }
+                for r in cur.fetchall()
+            ]
+
+            total_qty = sum(x["quantity"] for x in product_data)
+            total_amount = sum(x["amount"] for x in product_data)
+
+            lines = [
+                f"{i+1}. {x['product']}: {x['quantity']:,.0f} Qty (Rs {x['amount']:,.0f})"
+                for i, x in enumerate(product_data)
+            ]
+
+            who = salesperson or selected_team or "Overall"
+
+            answer = reply(
+                f"{who} product-wise sales for {period_text_en}:\n"
+                f"Total Qty: {total_qty:,.0f}\n"
+                f"Total Amount: Rs {total_amount:,.0f}\n\n"
+                + ("\n".join(lines) if lines else "No product-wise sales data found."),
+                f"{who} ki {period_text_ru} product-wise sales:\n"
+                f"Total Qty: {total_qty:,.0f}\n"
+                f"Total Amount: Rs {total_amount:,.0f}\n\n"
+                + ("\n".join(lines) if lines else "Product-wise sales data nahi mila.")
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "product_sales",
+                    "team": selected_team,
+                    "salesperson": salesperson,
+                    "period": period_text_en,
+                    "total_qty": total_qty,
+                    "total_amount": total_amount,
+                    "products": product_data,
+                },
+            }
+
+        # -----------------------------
+        # 7) Client-wise sales
+        # -----------------------------
+        if wants_client:
+            cur.execute(f"""
+                SELECT
+                    client_name,
+                    COALESCE(SUM(quantity), 0) AS total_qty,
+                    COALESCE(SUM(amount), 0) AS total_amount,
+                    COUNT(DISTINCT product) AS products_count,
+                    COUNT(DISTINCT sales_person) AS salespersons_count
+                FROM sales_entries
+                WHERE {sales_where}
+                GROUP BY client_name
+                ORDER BY COALESCE(SUM({achieved_field}), 0) DESC
+                LIMIT 50
+            """, tuple(sales_params))
+
+            client_data = [
+                {
+                    "client_name": r[0],
+                    "quantity": float(r[1] or 0),
+                    "amount": float(r[2] or 0),
+                    "products_count": int(r[3] or 0),
+                    "salespersons_count": int(r[4] or 0),
+                }
+                for r in cur.fetchall()
+            ]
+
+            total_qty = sum(x["quantity"] for x in client_data)
+            total_amount = sum(x["amount"] for x in client_data)
+
+            lines = [
+                f"{i+1}. {x['client_name']}: {x['quantity']:,.0f} Qty (Rs {x['amount']:,.0f}), Products {x['products_count']}"
+                for i, x in enumerate(client_data)
+            ]
+
+            who = salesperson or product or selected_team or "Overall"
+
+            answer = reply(
+                f"{who} client-wise sales for {period_text_en}:\n"
+                f"Total Qty: {total_qty:,.0f}\n"
+                f"Total Amount: Rs {total_amount:,.0f}\n\n"
+                + ("\n".join(lines) if lines else "No client-wise sales data found."),
+                f"{who} ki {period_text_ru} client-wise sales:\n"
+                f"Total Qty: {total_qty:,.0f}\n"
+                f"Total Amount: Rs {total_amount:,.0f}\n\n"
+                + ("\n".join(lines) if lines else "Client-wise sales data nahi mila.")
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "client_sales",
+                    "team": selected_team,
+                    "salesperson": salesperson,
+                    "product": product,
+                    "period": period_text_en,
+                    "total_qty": total_qty,
+                    "total_amount": total_amount,
+                    "clients": client_data,
+                },
+            }
+
+        # -----------------------------
+        # 8) Target / progress / team performance
+        # -----------------------------
+        if wants_target or wants_team:
+            cur.execute(f"""
+                SELECT
+                    sales_person,
+                    COALESCE(SUM(quantity), 0) AS total_qty,
+                    COALESCE(SUM(amount), 0) AS total_amount,
+                    COUNT(DISTINCT client_name) AS clients_count,
+                    COUNT(DISTINCT product) AS products_count
+                FROM sales_entries
+                WHERE {sales_where}
+                GROUP BY sales_person
+                ORDER BY COALESCE(SUM({achieved_field}), 0) DESC
+                LIMIT 50
+            """, tuple(sales_params))
+
+            salespersons = [
+                {
+                    "sales_person": r[0],
+                    "quantity": float(r[1] or 0),
+                    "amount": float(r[2] or 0),
+                    "clients_count": int(r[3] or 0),
+                    "products_count": int(r[4] or 0),
+                }
+                for r in cur.fetchall()
+            ]
+
+            total_qty = sum(x["quantity"] for x in salespersons)
+            total_amount = sum(x["amount"] for x in salespersons)
+            achieved = total_amount if team_target_type == "AMOUNT" else total_qty
+
+            target_value = 0.0
+
+            if selected_team:
+                if team_target_type == "AMOUNT":
+                    target_expr = """
+                        CASE
+                            WHEN COALESCE(target_type, 'QTY') = 'AMOUNT'
+                                THEN COALESCE(target_value, 0)
+                            ELSE 0
+                        END
+                    """
+                else:
+                    target_expr = """
+                        CASE
+                            WHEN COALESCE(target_type, 'QTY') = 'QTY'
+                                THEN COALESCE(NULLIF(target_value, 0), target_kg, 0)
+                            ELSE 0
+                        END
+                    """
+
+                target_filters = ["TRIM(team) = %s", "target_year = %s"]
+                target_params = [selected_team, year]
+
+                if salesperson:
+                    target_filters.append("LOWER(TRIM(username)) = LOWER(TRIM(%s))")
+                    target_params.append(salesperson)
+
+                if month:
+                    target_filters.append("target_month = %s")
+                    target_params.append(month)
+
+                target_where = " AND ".join(target_filters)
+
+                cur.execute(f"""
+                    SELECT COALESCE(SUM({target_expr}), 0)
+                    FROM sales_targets
+                    WHERE {target_where}
+                """, tuple(target_params))
+
+                target_value = float(cur.fetchone()[0] or 0)
+
+            percent = (achieved / target_value * 100) if target_value else 0
+            remaining = target_value - achieved
+
+            if not target_value:
+                direction_en = "Target is not set, so direction cannot be judged."
+                direction_ru = "Target set nahi hai, is liye direction judge nahi ho sakti."
+            elif percent < 50:
+                direction_en = "Weak. Follow-up and conversion need improvement."
+                direction_ru = "Weak hai, follow-up aur conversion improve karni hogi."
+            elif percent < 80:
+                direction_en = "Average. More push is needed to cover the target."
+                direction_ru = "Average hai, target cover karne ke liye push chahiye."
+            else:
+                direction_en = "Good direction."
+                direction_ru = "Sahi direction me hai."
+
+            lines = [
+                f"- {x['sales_person']}: {x['quantity']:,.0f} Qty, Rs {x['amount']:,.0f}, Clients {x['clients_count']}"
+                for x in salespersons[:20]
+            ]
+
+            who = salesperson or selected_team or "Overall"
+
+            answer = reply(
+                f"{who} performance for {period_text_en}:\n"
+                f"Achieved Qty: {total_qty:,.0f}\n"
+                f"Achieved Amount: Rs {total_amount:,.0f}\n"
+                f"Target: {target_value:,.0f} {unit}\n"
+                f"Achievement: {percent:.1f}%\n"
+                f"Remaining: {remaining:,.0f} {unit}\n"
+                f"Direction: {direction_en}\n\n"
+                f"Salesperson details:\n" + ("\n".join(lines) if lines else "No salesperson data found."),
+                f"{who} ka {period_text_ru} performance:\n"
+                f"Achieved Qty: {total_qty:,.0f}\n"
+                f"Achieved Amount: Rs {total_amount:,.0f}\n"
+                f"Target: {target_value:,.0f} {unit}\n"
+                f"Achievement: {percent:.1f}%\n"
+                f"Remaining: {remaining:,.0f} {unit}\n"
+                f"Direction: {direction_ru}\n\n"
+                f"Salesperson details:\n" + ("\n".join(lines) if lines else "Salesperson data nahi mila.")
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "performance",
+                    "team": selected_team,
+                    "salesperson": salesperson,
+                    "period": period_text_en,
+                    "target_type": team_target_type,
+                    "unit": unit,
+                    "total_qty": total_qty,
+                    "total_amount": total_amount,
+                    "target": target_value,
+                    "achievement_percent": round(percent, 2),
+                    "remaining": remaining,
+                    "salespersons": salespersons[:20],
+                },
+            }
+
+        # -----------------------------
+        # 9) Default smart short summary
+        # -----------------------------
+        cur.execute(f"""
+            SELECT
+                COALESCE(SUM(quantity), 0) AS total_qty,
+                COALESCE(SUM(amount), 0) AS total_amount,
+                COUNT(*) AS total_entries,
+                COUNT(DISTINCT client_name) AS clients_count,
+                COUNT(DISTINCT product) AS products_count,
+                COUNT(DISTINCT sales_person) AS salespersons_count
+            FROM sales_entries
+            WHERE {sales_where}
+        """, tuple(sales_params))
+
+        r = cur.fetchone()
+        total_qty = float(r[0] or 0)
+        total_amount = float(r[1] or 0)
+        total_entries = int(r[2] or 0)
+        clients_count = int(r[3] or 0)
+        products_count = int(r[4] or 0)
+        salespersons_count = int(r[5] or 0)
+
+        cur.execute(f"""
+            SELECT COUNT(*), COUNT(DISTINCT client_name)
+            FROM visit_entries
+            WHERE {visit_where}
+        """, tuple(visit_params))
+
+        v = cur.fetchone()
+        total_visits = int(v[0] or 0)
+        visited_clients = int(v[1] or 0)
+
+        who = salesperson or product or client or selected_team or "Overall"
+
+        answer = reply(
+            f"{who} summary for {period_text_en}:\n"
+            f"Total Qty: {total_qty:,.0f}\n"
+            f"Total Amount: Rs {total_amount:,.0f}\n"
+            f"Sales Entries: {total_entries}\n"
+            f"Clients: {clients_count}\n"
+            f"Products: {products_count}\n"
+            f"Salespersons: {salespersons_count}\n"
+            f"Visits: {total_visits}\n"
+            f"Visited Clients: {visited_clients}",
+            f"{who} ka {period_text_ru} summary:\n"
+            f"Total Qty: {total_qty:,.0f}\n"
+            f"Total Amount: Rs {total_amount:,.0f}\n"
+            f"Sales Entries: {total_entries}\n"
+            f"Clients: {clients_count}\n"
+            f"Products: {products_count}\n"
+            f"Salespersons: {salespersons_count}\n"
+            f"Visits: {total_visits}\n"
+            f"Visited Clients: {visited_clients}"
+        )
+
+        return {
+            "answer": answer,
+            "data": {
+                "type": "summary",
                 "team": selected_team,
                 "salesperson": salesperson,
                 "product": product,
                 "client": client,
-                "month": month or "Full Year",
-                "year": year,
-                "team_target_type": team_target_type,
-            },            
-            "summary": {
+                "period": period_text_en,
                 "total_qty": total_qty,
                 "total_amount": total_amount,
-                "total_entries": total_entries,
-                "total_clients": total_clients,
-                "total_products": total_products,
-                "total_salespersons": total_salespersons,
-            },
-            "target": {
-                "target_value": target_value,
-                "unit": unit,
-                "achievement_percent": round(percent, 2),
-                "remaining": remaining,
-                "direction": direction,
-            },
-            "visits": {
-                "total_visits": total_visits,
+                "sales_entries": total_entries,
+                "clients": clients_count,
+                "products": products_count,
+                "salespersons": salespersons_count,
+                "visits": total_visits,
                 "visited_clients": visited_clients,
-                "repeat_visits": repeat_visits,
-                "visiting_salespersons": visiting_salespersons,
-                "visit_order_amount": visit_order_amount,
-                "visit_quantity": visit_quantity,
-                "repeat_clients": repeat_clients,
-                "call_phone_top": call_phone_top,
-                "call_phone_details": call_phone_details,
-                "suspicious_visits": suspicious_visits,
             },
-            "breakdowns": {
-                "products": product_breakdown,
-                "clients": client_breakdown,
-                "salespersons": salesperson_breakdown,
-                "teams": team_breakdown,
-            },
-        }
-
-        return {
-            "answer": answer,
-            "data": context,
         }
 
     finally:
