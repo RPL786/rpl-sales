@@ -633,6 +633,13 @@ def ensure_database_schema():
     )
     """)
 
+    cur.execute("ALTER TABLE visit_entries ADD COLUMN IF NOT EXISTS notes TEXT")
+    cur.execute("ALTER TABLE visit_entries ADD COLUMN IF NOT EXISTS client_response TEXT")
+    cur.execute("ALTER TABLE visit_entries ADD COLUMN IF NOT EXISTS order_amount REAL DEFAULT 0")
+    cur.execute("ALTER TABLE visit_entries ADD COLUMN IF NOT EXISTS quantity REAL DEFAULT 0")
+    cur.execute("ALTER TABLE visit_entries ADD COLUMN IF NOT EXISTS meeting_status TEXT DEFAULT ''")
+    cur.execute("ALTER TABLE visit_entries ADD COLUMN IF NOT EXISTS meeting_type TEXT DEFAULT ''")
+
     admin_username = os.getenv("ADMIN_USERNAME", "admin").strip()
     admin_password = os.getenv("ADMIN_PASSWORD", "admin123").strip()
 
