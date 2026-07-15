@@ -3673,8 +3673,18 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
 
     q_lower = question.lower()
 
-    year_match = re.search(r"\b(20\d{2})\b", question)
-    year = int(year_match.group(1)) if year_match else datetime.now().year
+    year_matches = re.findall(r"\b(20\d{2})\b", question)
+    years = sorted(list(set([int(y) for y in year_matches])))
+
+    if not years:
+        years = [datetime.now().year]
+
+    year = years[-1]
+    compare_years = years
+
+    if len(compare_years) == 1 and any(word in q_lower for word in ["compare", "comparison", "vs", "versus", "last year", "previous year", "2025"]):
+        compare_years = [year - 1, year]
+
     month = extract_month_from_question(question)
 
     conn = get_db_connection()
@@ -4409,7 +4419,41 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
 
         period_text = f"{month} {year}" if month else f"Full Year {year}"
 
-        if wants_call_phone:
+        wants_comparison = any(word in q_lower for word in ["compare", "comparison", "vs", "versus", "last year", "previous year"])
+
+        if wants_comparison and comparison_data:
+            lines = []
+            for item in comparison_data:
+                lines.append(
+                    f"{item['year']}: Qty {item['total_qty']:,.0f}, "
+                    f"Amount Rs {item['total_amount']:,.0f}, "
+                    f"Clients {item['clients_count']}, Products {item['products_count']}"
+                )
+
+            growth_text = ""
+            if len(comparison_data) >= 2:
+                old = comparison_data[0]
+                new = comparison_data[-1]
+
+                qty_diff = new["total_qty"] - old["total_qty"]
+                amount_diff = new["total_amount"] - old["total_amount"]
+
+                qty_growth = (qty_diff / old["total_qty"] * 100) if old["total_qty"] else 0
+                amount_growth = (amount_diff / old["total_amount"] * 100) if old["total_amount"] else 0
+
+                growth_text = (
+                    f"\n\nGrowth:\n"
+                    f"Qty Difference: {qty_diff:,.0f} ({qty_growth:.1f}%)\n"
+                    f"Amount Difference: Rs {amount_diff:,.0f} ({amount_growth:.1f}%)"
+                )
+
+            answer = (
+                f"Comparison report for {month or 'Full Year'}:\n\n"
+                + "\n".join(lines)
+                + growth_text
+            )
+
+        elif wants_call_phone:
             if call_phone_top:
                 top_lines = []
                 for item in call_phone_top:
@@ -4615,8 +4659,66 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 f"Direction: {direction}."
             )
 
+        comparison_data = []
+
+        if len(compare_years) > 1:
+            comp_filters = []
+            comp_params = []
+
+            if selected_team:
+                comp_filters.append("TRIM(team) = %s")
+                comp_params.append(selected_team)
+
+            if salesperson:
+                comp_filters.append("LOWER(TRIM(sales_person)) = LOWER(TRIM(%s))")
+                comp_params.append(salesperson)
+
+            if product:
+                comp_filters.append("LOWER(TRIM(product)) = LOWER(TRIM(%s))")
+                comp_params.append(product)
+
+            if client:
+                comp_filters.append("LOWER(TRIM(client_name)) = LOWER(TRIM(%s))")
+                comp_params.append(client)
+
+            if month:
+                comp_filters.append("month = %s")
+                comp_params.append(month)
+
+            comp_filters.append("year = ANY(%s)")
+            comp_params.append(compare_years)
+
+            comp_where = " AND ".join(comp_filters)
+
+            cur.execute(f"""
+                SELECT
+                    year,
+                    COALESCE(SUM(quantity), 0) AS total_qty,
+                    COALESCE(SUM(amount), 0) AS total_amount,
+                    COUNT(DISTINCT client_name) AS clients_count,
+                    COUNT(DISTINCT product) AS products_count,
+                    COUNT(DISTINCT sales_person) AS salespersons_count
+                FROM sales_entries
+                WHERE {comp_where}
+                GROUP BY year
+                ORDER BY year
+            """, tuple(comp_params))
+
+            comparison_data = [
+                {
+                    "year": int(r[0]),
+                    "total_qty": float(r[1] or 0),
+                    "total_amount": float(r[2] or 0),
+                    "clients_count": int(r[3] or 0),
+                    "products_count": int(r[4] or 0),
+                    "salespersons_count": int(r[5] or 0),
+                }
+                for r in cur.fetchall()
+            ]
+        
         context = {
             "question": question,
+            "comparison": comparison_data,
             "detected": {
                 "team": selected_team,
                 "salesperson": salesperson,
@@ -4625,7 +4727,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 "month": month or "Full Year",
                 "year": year,
                 "team_target_type": team_target_type,
-            },
+            },            
             "summary": {
                 "total_qty": total_qty,
                 "total_amount": total_amount,
