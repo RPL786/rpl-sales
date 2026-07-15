@@ -4150,22 +4150,22 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             FROM visit_entries
             WHERE {visit_where}
               AND (
-                    LOWER(COALESCE(notes, '')) LIKE '%call%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%phone%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%on call%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%on phone%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%telephonic%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%whatsapp call%'
+                    LOWER(COALESCE(notes, '')) LIKE '%%call%%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%%phone%%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%%on call%%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%%on phone%%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%%telephonic%%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%%whatsapp call%%'
 
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%call%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%phone%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%on call%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%on phone%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%telephonic%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%whatsapp call%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%%call%%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%%phone%%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%%on call%%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%%on phone%%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%%telephonic%%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%%whatsapp call%%'
 
-                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%call%'
-                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%phone%'
+                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%%call%%'
+                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%%phone%%'
               )
             GROUP BY sales_person
             ORDER BY COUNT(*) DESC
@@ -4198,22 +4198,22 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             FROM visit_entries
             WHERE {visit_where}
               AND (
-                    LOWER(COALESCE(notes, '')) LIKE '%call%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%phone%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%on call%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%on phone%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%telephonic%'
-                 OR LOWER(COALESCE(notes, '')) LIKE '%whatsapp call%'
+                    LOWER(COALESCE(notes, '')) LIKE '%%call%%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%%phone%%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%%on call%%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%%on phone%%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%%telephonic%%'
+                 OR LOWER(COALESCE(notes, '')) LIKE '%%whatsapp call%%'
 
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%call%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%phone%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%on call%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%on phone%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%telephonic%'
-                 OR LOWER(COALESCE(client_response, '')) LIKE '%whatsapp call%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%%call%%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%%phone%%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%%on call%%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%%on phone%%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%%telephonic%%'
+                 OR LOWER(COALESCE(client_response, '')) LIKE '%%whatsapp call%%'
 
-                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%call%'
-                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%phone%'
+                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%%call%%'
+                 OR LOWER(COALESCE(meeting_status, '')) LIKE '%%phone%%'
               )
             ORDER BY meeting_date DESC, sales_person, client_name
             LIMIT 50
