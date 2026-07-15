@@ -3909,54 +3909,54 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             },
         }
 
-                q_lower = question.lower()
+        q_lower = question.lower()
 
-                if salesperson:
-                    if "kon kon" in q_lower or "which product" in q_lower or "products" in q_lower or "product" in q_lower:
-                        if product_breakdown:
-                            lines = []
-                            for item in product_breakdown:
-                                if team_target_type == "AMOUNT":
-                                    lines.append(
-                                        f"{item['product']}: Rs {item['amount']:,.0f} "
-                                        f"({item['quantity']:,.0f} Qty)"
-                                    )
-                                else:
-                                    lines.append(
-                                        f"{item['product']}: {item['quantity']:,.0f} Qty "
-                                        f"(Rs {item['amount']:,.0f})"
-                                    )
-
-                            answer = (
-                                f"{salesperson} ne {month or 'full year'} me total {total_qty:,.0f} Qty sale ki.\n\n"
-                                f"Sari product-wise details:\n"
-                                + "\n".join([f"{i+1}. {line}" for i, line in enumerate(lines)])
-                                + f"\n\nTotal products sold: {len(product_breakdown)}"
-                            )
+        if salesperson:
+            if "kon kon" in q_lower or "which product" in q_lower or "products" in q_lower or "product" in q_lower:
+                if product_breakdown:
+                    lines = []
+                    for item in product_breakdown:
+                        if team_target_type == "AMOUNT":
+                            lines.append(
+                                f"{item['product']}: Rs {item['amount']:,.0f} "
+                                f"({item['quantity']:,.0f} Qty)"
+                             )
                         else:
-                            answer = f"{salesperson} ki {month or 'full year'} me product-wise sale nahi mili."
-                    else:
-                        direction = "sahi direction me hai"
-                        if target_value and percent < 50:
-                            direction = "weak hai, follow-up aur conversion improve karni hogi"
-                        elif target_value and percent < 80:
-                            direction = "average hai, target cover karne ke liye push chahiye"
+                            lines.append(
+                                f"{item['product']}: {item['quantity']:,.0f} Qty "
+                                f"(Rs {item['amount']:,.0f})"
+                            )
 
-                        answer = (
-                            f"{salesperson} ka {month or 'full year'} result:\n"
-                            f"Achieved: {achieved:,.0f} {unit}\n"
-                            f"Target: {target_value:,.0f} {unit}\n"
-                            f"Achievement: {percent:.1f}%\n"
-                            f"Remaining: {remaining:,.0f} {unit}\n"
-                            f"Visits: {total_visits}\n"
-                            f"Clients visited: {visited_clients}\n\n"
-                            f"Direction: {direction}."
-                        )
-                else:
                     answer = (
-                        f"Salesperson clear detect nahi hua. "
-                        f"Question me exact salesperson name aur team mention karein."
+                        f"{salesperson} ne {month or 'full year'} me total {total_qty:,.0f} Qty sale ki.\n\n"
+                        f"Sari product-wise details:\n"
+                        + "\n".join([f"{i+1}. {line}" for i, line in enumerate(lines)])
+                        + f"\n\nTotal products sold: {len(product_breakdown)}"
                     )
+                else:
+                    answer = f"{salesperson} ki {month or 'full year'} me product-wise sale nahi mili."
+            else:
+                direction = "sahi direction me hai"
+                if target_value and percent < 50:
+                    direction = "weak hai, follow-up aur conversion improve karni hogi"
+                elif target_value and percent < 80:
+                    direction = "average hai, target cover karne ke liye push chahiye"
+
+                answer = (
+                    f"{salesperson} ka {month or 'full year'} result:\n"
+                    f"Achieved: {achieved:,.0f} {unit}\n"
+                    f"Target: {target_value:,.0f} {unit}\n"
+                    f"Achievement: {percent:.1f}%\n"
+                    f"Remaining: {remaining:,.0f} {unit}\n"
+                    f"Visits: {total_visits}\n"
+                    f"Clients visited: {visited_clients}\n\n"
+                    f"Direction: {direction}."
+                )
+        else:
+            answer = (
+                f"Salesperson clear detect nahi hua. "
+                f"Question me exact salesperson name aur team mention karein."
+            )
 @app.get("/admin/download-backup")
 def download_backup(user: dict = Depends(require_admin)):
 
