@@ -4669,6 +4669,143 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
         # -----------------------------
         # 6) Target / progress / team performance
         # -----------------------------
+        if wants_target and not selected_team and not salesperson:
+            target_month = month
+
+            if not target_month:
+                return {
+                    "answer": reply(
+                        "Please mention the month for target report, for example: July 2026 target report for all salespersons.",
+                        "Target report ke liye month mention karein, example: July 2026 all salespersons target report."
+                    ),
+                    "data": {
+                        "type": "target_report_missing_month"
+                    },
+                }
+
+            cur.execute("""
+                WITH target_data AS (
+                    SELECT
+                        st.username,
+                        st.team,
+                        COALESCE(t.target_type, 'QTY') AS team_target_type,
+                        SUM(
+                            CASE
+                                WHEN COALESCE(t.target_type, 'QTY') = 'AMOUNT'
+                                     AND COALESCE(st.target_type, 'QTY') = 'AMOUNT'
+                                    THEN COALESCE(st.target_value, 0)
+                                WHEN COALESCE(t.target_type, 'QTY') = 'QTY'
+                                     AND COALESCE(st.target_type, 'QTY') = 'QTY'
+                                    THEN COALESCE(NULLIF(st.target_value, 0), st.target_kg, 0)
+                                ELSE 0
+                            END
+                        ) AS target_value
+                    FROM sales_targets st
+                    LEFT JOIN teams t
+                        ON TRIM(t.name) = TRIM(st.team)
+                    WHERE st.target_year = %s
+                      AND st.target_month = %s
+                    GROUP BY st.username, st.team, COALESCE(t.target_type, 'QTY')
+                ),
+                achieved_data AS (
+                    SELECT
+                        sales_person,
+                        team,
+                        SUM(COALESCE(quantity, 0)) AS achieved_qty,
+                        SUM(COALESCE(amount, 0)) AS achieved_amount
+                    FROM sales_entries
+                    WHERE year = %s
+                      AND month = %s
+                    GROUP BY sales_person, team
+                )
+                SELECT
+                    td.username,
+                    td.team,
+                    td.team_target_type,
+                    COALESCE(td.target_value, 0) AS target_value,
+                    COALESCE(ad.achieved_qty, 0) AS achieved_qty,
+                    COALESCE(ad.achieved_amount, 0) AS achieved_amount
+                FROM target_data td
+                LEFT JOIN achieved_data ad
+                    ON LOWER(TRIM(ad.sales_person)) = LOWER(TRIM(td.username))
+                   AND TRIM(ad.team) = TRIM(td.team)
+                ORDER BY td.team, td.username
+            """, (year, target_month, year, target_month))
+
+            rows = cur.fetchall()
+
+            report = []
+            for r in rows:
+                username = r[0]
+                team_name = r[1]
+                target_type = str(r[2] or "QTY").upper()
+                target_value = float(r[3] or 0)
+                achieved_qty = float(r[4] or 0)
+                achieved_amount = float(r[5] or 0)
+
+                achieved_value = achieved_amount if target_type == "AMOUNT" else achieved_qty
+                unit_label = "Rs" if target_type == "AMOUNT" else "Qty"
+                percent = (achieved_value / target_value * 100) if target_value else 0
+                remaining = target_value - achieved_value
+
+                report.append({
+                    "username": username,
+                    "team": team_name,
+                    "target_type": target_type,
+                    "unit": unit_label,
+                    "target": target_value,
+                    "achieved": achieved_value,
+                    "achieved_qty": achieved_qty,
+                    "achieved_amount": achieved_amount,
+                    "achievement_percent": round(percent, 2),
+                    "remaining": remaining,
+                })
+
+            lines = []
+            for item in report:
+                lines.append(
+                    f"- {item['username']} | {item['team']}: "
+                    f"Target {item['target']:,.0f} {item['unit']}, "
+                    f"Achieved {item['achieved']:,.0f} {item['unit']}, "
+                    f"Achievement {item['achievement_percent']:.1f}%, "
+                    f"Remaining {item['remaining']:,.0f} {item['unit']}"
+                )
+
+            total_target = sum(x["target"] for x in report)
+            total_achieved = sum(x["achieved"] for x in report)
+            total_remaining = sum(x["remaining"] for x in report)
+            total_percent = (total_achieved / total_target * 100) if total_target else 0
+
+            answer = reply(
+                f"{target_month} {year} target vs achievement report for all salespersons:\n\n"
+                f"Total Target: {total_target:,.0f}\n"
+                f"Total Achieved: {total_achieved:,.0f}\n"
+                f"Achievement: {total_percent:.1f}%\n"
+                f"Remaining: {total_remaining:,.0f}\n\n"
+                f"Salesperson-wise details:\n"
+                + ("\n".join(lines) if lines else "No target data found."),
+                f"{target_month} {year} all salespersons target vs achievement report:\n\n"
+                f"Total Target: {total_target:,.0f}\n"
+                f"Total Achieved: {total_achieved:,.0f}\n"
+                f"Achievement: {total_percent:.1f}%\n"
+                f"Remaining: {total_remaining:,.0f}\n\n"
+                f"Salesperson-wise details:\n"
+                + ("\n".join(lines) if lines else "Target data nahi mila.")
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "all_salespersons_target_report",
+                    "month": target_month,
+                    "year": year,
+                    "total_target": total_target,
+                    "total_achieved": total_achieved,
+                    "achievement_percent": round(total_percent, 2),
+                    "total_remaining": total_remaining,
+                    "salespersons": report,
+                },
+            }        
         if wants_target or wants_team:
             cur.execute(f"""
                 SELECT
