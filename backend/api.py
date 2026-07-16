@@ -4465,7 +4465,10 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             quantity = float(r[4] or 0)
 
             cur.execute(f"""
-                SELECT sales_person, COUNT(*) AS visits, COUNT(DISTINCT client_name) AS clients
+                SELECT
+                    sales_person,
+                    COUNT(*) AS visits,
+                    COUNT(DISTINCT client_name) AS clients
                 FROM visit_entries
                 WHERE {visit_where}
                 GROUP BY sales_person
@@ -4482,29 +4485,166 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 for x in cur.fetchall()
             ]
 
-            lines = [f"- {x['sales_person']}: {x['visits']} visits, Clients {x['clients']}" for x in top_visitors]
+            cur.execute(f"""
+                SELECT
+                    client_name,
+                    sales_person,
+                    COUNT(*) AS visit_count,
+                    COALESCE(SUM(order_amount), 0) AS order_amount,
+                    COALESCE(SUM(quantity), 0) AS quantity,
+                    STRING_AGG(DISTINCT product, ', ') AS products,
+                    STRING_AGG(DISTINCT meeting_status, ', ') AS statuses,
+                    STRING_AGG(DISTINCT client_response, ', ') AS responses,
+                    STRING_AGG(DISTINCT notes, ' | ') AS notes
+                FROM visit_entries
+                WHERE {visit_where}
+                GROUP BY client_name, sales_person
+                ORDER BY COUNT(*) DESC, client_name
+                LIMIT 100
+            """, tuple(visit_params))
+
+            visit_clients = [
+                {
+                    "client_name": x[0],
+                    "sales_person": x[1],
+                    "visit_count": int(x[2] or 0),
+                    "order_amount": float(x[3] or 0),
+                    "quantity": float(x[4] or 0),
+                    "products": x[5] or "",
+                    "statuses": x[6] or "",
+                    "responses": x[7] or "",
+                    "notes": x[8] or "",
+                }
+                for x in cur.fetchall()
+            ]
+
+            # Match visit clients with sales data to find weak / doubtful working
+            weak_clients = []
+
+            for item in visit_clients:
+                sales_check_filters = []
+                sales_check_params = []
+
+                if selected_team:
+                    sales_check_filters.append("TRIM(team) = %s")
+                    sales_check_params.append(selected_team)
+
+                sales_check_filters.append("LOWER(TRIM(sales_person)) = LOWER(TRIM(%s))")
+                sales_check_params.append(item["sales_person"])
+
+                sales_check_filters.append("LOWER(TRIM(client_name)) = LOWER(TRIM(%s))")
+                sales_check_params.append(item["client_name"])
+
+                sales_check_filters.append("year = %s")
+                sales_check_params.append(year)
+
+                if month:
+                    sales_check_filters.append("month = %s")
+                    sales_check_params.append(month)
+
+                sales_check_where = " AND ".join(sales_check_filters)
+
+                cur.execute(f"""
+                    SELECT
+                        COALESCE(SUM(quantity), 0),
+                        COALESCE(SUM(amount), 0)
+                    FROM sales_entries
+                    WHERE {sales_check_where}
+                """, tuple(sales_check_params))
+
+                s = cur.fetchone()
+                sales_qty = float(s[0] or 0)
+                sales_amount = float(s[1] or 0)
+
+                item["sales_qty"] = sales_qty
+                item["sales_amount"] = sales_amount
+
+                reason = ""
+
+                if item["visit_count"] >= 2 and sales_qty == 0 and sales_amount == 0:
+                    reason = "Repeat visits but no matching sales found"
+                elif item["visit_count"] >= 3 and item["order_amount"] == 0:
+                    reason = "Multiple visits but visit order amount is zero"
+                elif item["order_amount"] > 0 and sales_qty == 0 and sales_amount == 0:
+                    reason = "Order mentioned in visit but no matching sales entry found"
+
+                if reason:
+                    weak_clients.append({
+                        "client_name": item["client_name"],
+                        "sales_person": item["sales_person"],
+                        "visit_count": item["visit_count"],
+                        "order_amount": item["order_amount"],
+                        "quantity": item["quantity"],
+                        "sales_qty": sales_qty,
+                        "sales_amount": sales_amount,
+                        "products": item["products"],
+                        "statuses": item["statuses"],
+                        "responses": item["responses"],
+                        "reason": reason,
+                    })
+
+            top_lines = [
+                f"- {x['sales_person']}: {x['visits']} visits, Clients {x['clients']}"
+                for x in top_visitors
+            ]
+
+            client_lines = []
+            for item in visit_clients[:50]:
+                client_lines.append(
+                    f"- {item['client_name']} ({item['sales_person']}): "
+                    f"{item['visit_count']} visits, "
+                    f"Visit Qty {item['quantity']:,.0f}, "
+                    f"Visit Order Rs {item['order_amount']:,.0f}, "
+                    f"Sales Qty {item['sales_qty']:,.0f}, "
+                    f"Sales Rs {item['sales_amount']:,.0f}, "
+                    f"Products: {item['products'] or '-'}"
+                )
+
+            weak_lines = []
+            for item in weak_clients[:30]:
+                weak_lines.append(
+                    f"- {item['sales_person']} | {item['client_name']}: "
+                    f"{item['visit_count']} visits, "
+                    f"Visit Order Rs {item['order_amount']:,.0f}, "
+                    f"Sales Qty {item['sales_qty']:,.0f}, "
+                    f"Reason: {item['reason']}"
+                )
+
+            who = salesperson or selected_team or "Overall"
 
             answer = reply(
-                f"Visit summary for {period_text_en}:\n"
+                f"{who} visit report for {period_text_en}:\n\n"
                 f"Total Visits: {total_visits}\n"
                 f"Clients Visited: {visited_clients}\n"
                 f"Salespersons: {visiting_salespersons}\n"
                 f"Visit Order Amount: Rs {order_amount:,.0f}\n"
                 f"Visit Quantity: {quantity:,.0f}\n\n"
-                f"Top visitors:\n" + ("\n".join(lines) if lines else "No visit data found."),
-                f"{period_text_ru} visit summary:\n"
+                f"Top visitors:\n"
+                + ("\n".join(top_lines) if top_lines else "No visitor data found.")
+                + "\n\nClient-wise visit details:\n"
+                + ("\n".join(client_lines) if client_lines else "No client visit details found.")
+                + "\n\nWeak / verification required clients:\n"
+                + ("\n".join(weak_lines) if weak_lines else "No obvious weak or doubtful visit pattern found.")
+                + "\n\nNote: These are not confirmed fake visits; these are verification-required cases based on visits vs sales matching.",
+                f"{who} ki {period_text_ru} visit report:\n\n"
                 f"Total Visits: {total_visits}\n"
                 f"Clients Visited: {visited_clients}\n"
                 f"Salespersons: {visiting_salespersons}\n"
                 f"Visit Order Amount: Rs {order_amount:,.0f}\n"
                 f"Visit Quantity: {quantity:,.0f}\n\n"
-                f"Top visitors:\n" + ("\n".join(lines) if lines else "Visit data nahi mila.")
+                f"Top visitors:\n"
+                + ("\n".join(top_lines) if top_lines else "Visitor data nahi mila.")
+                + "\n\nClient-wise visit details:\n"
+                + ("\n".join(client_lines) if client_lines else "Client visit details nahi mili.")
+                + "\n\nWeak / verification required clients:\n"
+                + ("\n".join(weak_lines) if weak_lines else "Koi obvious weak ya doubtful visit pattern nahi mila.")
+                + "\n\nNote: Ye confirmed fake visits nahi, visits vs sales matching ke basis par verification-required cases hain."
             )
 
             return {
                 "answer": answer,
                 "data": {
-                    "type": "visit_summary",
+                    "type": "visit_detail_report",
                     "team": selected_team,
                     "salesperson": salesperson,
                     "period": period_text_en,
@@ -4514,9 +4654,10 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                     "order_amount": order_amount,
                     "quantity": quantity,
                     "top_visitors": top_visitors,
+                    "client_details": visit_clients[:50],
+                    "weak_clients": weak_clients[:30],
                 },
             }
-
         # -----------------------------
         # 6) Product-wise sales
         # -----------------------------
