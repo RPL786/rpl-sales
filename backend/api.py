@@ -3915,13 +3915,33 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
         wants_count = any(w in q_lower for w in ["how many", "count", "kitne", "kitni", "kitna"])
         wants_salesperson_count = wants_count and any(w in q_lower for w in ["salesperson", "sales person", "salespersons", "sales persons"])
         wants_client_count = wants_count and any(w in q_lower for w in ["client", "clients", "customer", "customers", "party", "parties"])
-        wants_product_count = wants_count and any(w in q_lower for w in ["product", "products"])
+        wants_details = any(w in q_lower for w in [
+            "detail", "details", "detailed", "list", "breakdown",
+            "kon kon", "which", "wise", "product-wise", "product wise"
+        ])
+
+        wants_product_count = (
+            wants_count
+            and any(w in q_lower for w in ["product", "products"])
+            and not wants_details
+            and "sales" not in q_lower
+            and "sale" not in q_lower
+        )
         wants_team_count = wants_count and "team" in q_lower
 
         wants_visit_audit = any(w in q_lower for w in ["fake", "audit", "suspicious", "jhooti", "jhoot", "verify", "verification"])
         wants_call_phone = any(w in q_lower for w in ["call", "phone", "on call", "on phone", "telephonic", "whatsapp call"])
         wants_visit = "visit" in q_lower or "visits" in q_lower
-        wants_product = "product" in q_lower or "products" in q_lower or "kon kon si" in q_lower or bool(product)
+        wants_product = (
+            "product" in q_lower
+            or "products" in q_lower
+            or "product-wise" in q_lower
+            or "product wise" in q_lower
+            or "kon kon si" in q_lower
+            or "details" in q_lower
+            or "breakdown" in q_lower
+            or bool(product)
+        )
         wants_client = any(w in q_lower for w in ["client", "clients", "customer", "customers", "party", "parties"]) or bool(client)
         wants_target = any(w in q_lower for w in ["target", "progress", "direction", "achievement", "remaining", "short"])
         wants_team = "team" in q_lower
@@ -4504,44 +4524,79 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             cur.execute(f"""
                 SELECT
                     product,
+                    client_name,
                     COALESCE(SUM(quantity), 0) AS total_qty,
                     COALESCE(SUM(amount), 0) AS total_amount,
-                    COUNT(DISTINCT client_name) AS clients_count,
-                    COUNT(DISTINCT sales_person) AS salespersons_count
+                    COUNT(*) AS entries_count
                 FROM sales_entries
                 WHERE {sales_where}
-                GROUP BY product
-                ORDER BY COALESCE(SUM({achieved_field}), 0) DESC
-                LIMIT 100
+                GROUP BY product, client_name
+                ORDER BY product, COALESCE(SUM({achieved_field}), 0) DESC
+                LIMIT 200
             """, tuple(sales_params))
 
-            product_data = [
+            rows = cur.fetchall()
+
+            product_client_data = [
                 {
                     "product": r[0],
-                    "quantity": float(r[1] or 0),
-                    "amount": float(r[2] or 0),
-                    "clients_count": int(r[3] or 0),
-                    "salespersons_count": int(r[4] or 0),
+                    "client_name": r[1],
+                    "quantity": float(r[2] or 0),
+                    "amount": float(r[3] or 0),
+                    "entries_count": int(r[4] or 0),
                 }
-                for r in cur.fetchall()
+                for r in rows
             ]
 
-            total_qty = sum(x["quantity"] for x in product_data)
-            total_amount = sum(x["amount"] for x in product_data)
+            product_summary = {}
+            for item in product_client_data:
+                p = item["product"] or "Unknown Product"
+                if p not in product_summary:
+                    product_summary[p] = {
+                        "product": p,
+                        "quantity": 0,
+                        "amount": 0,
+                        "clients_count": 0,
+                        "clients": [],
+                    }
 
-            lines = [
-                f"{i+1}. {x['product']}: {x['quantity']:,.0f} Qty (Rs {x['amount']:,.0f})"
-                for i, x in enumerate(product_data)
-            ]
+                product_summary[p]["quantity"] += item["quantity"]
+                product_summary[p]["amount"] += item["amount"]
+                product_summary[p]["clients_count"] += 1
+                product_summary[p]["clients"].append({
+                    "client_name": item["client_name"],
+                    "quantity": item["quantity"],
+                    "amount": item["amount"],
+                })
+
+            products_list = list(product_summary.values())
+
+            total_qty = sum(x["quantity"] for x in products_list)
+            total_amount = sum(x["amount"] for x in products_list)
+
+            lines = []
+            for i, p in enumerate(products_list, start=1):
+                lines.append(
+                    f"{i}. {p['product']} — Total Qty {p['quantity']:,.0f}, "
+                    f"Amount Rs {p['amount']:,.0f}, Clients {p['clients_count']}"
+                )
+
+                for c in p["clients"]:
+                    lines.append(
+                        f"   - {c['client_name']}: {c['quantity']:,.0f} Qty, "
+                        f"Rs {c['amount']:,.0f}"
+                    )
 
             who = salesperson or selected_team or "Overall"
 
             answer = reply(
-                f"{who} product-wise sales for {period_text_en}:\n"
+                f"{who} product-wise sales with client details for {period_text_en}:\n"
+                f"Products Sold: {len(products_list)}\n"
                 f"Total Qty: {total_qty:,.0f}\n"
                 f"Total Amount: Rs {total_amount:,.0f}\n\n"
                 + ("\n".join(lines) if lines else "No product-wise sales data found."),
-                f"{who} ki {period_text_ru} product-wise sales:\n"
+                f"{who} ki {period_text_ru} product-wise sales client details ke sath:\n"
+                f"Products Sold: {len(products_list)}\n"
                 f"Total Qty: {total_qty:,.0f}\n"
                 f"Total Amount: Rs {total_amount:,.0f}\n\n"
                 + ("\n".join(lines) if lines else "Product-wise sales data nahi mila.")
@@ -4550,13 +4605,14 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             return {
                 "answer": answer,
                 "data": {
-                    "type": "product_sales",
+                    "type": "product_sales_with_clients",
                     "team": selected_team,
                     "salesperson": salesperson,
                     "period": period_text_en,
+                    "products_sold": len(products_list),
                     "total_qty": total_qty,
                     "total_amount": total_amount,
-                    "products": product_data,
+                    "products": products_list,
                 },
             }
 
