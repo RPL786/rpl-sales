@@ -5023,14 +5023,15 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 SELECT
                     product,
                     client_name,
+                    sales_person,
                     COALESCE(SUM(quantity), 0) AS total_qty,
                     COALESCE(SUM(amount), 0) AS total_amount,
                     COUNT(*) AS entries_count
                 FROM sales_entries
                 WHERE {sales_where}
-                GROUP BY product, client_name
+                GROUP BY product, client_name, sales_person
                 ORDER BY product, COALESCE(SUM({achieved_field}), 0) DESC
-                LIMIT 200
+                LIMIT 300
             """, tuple(sales_params))
 
             rows = cur.fetchall()
@@ -5039,9 +5040,10 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 {
                     "product": r[0],
                     "client_name": r[1],
-                    "quantity": float(r[2] or 0),
-                    "amount": float(r[3] or 0),
-                    "entries_count": int(r[4] or 0),
+                    "sales_person": r[2],
+                    "quantity": float(r[3] or 0),
+                    "amount": float(r[4] or 0),
+                    "entries_count": int(r[5] or 0),
                 }
                 for r in rows
             ]
@@ -5063,6 +5065,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 product_summary[p]["clients_count"] += 1
                 product_summary[p]["clients"].append({
                     "client_name": item["client_name"],
+                    "sales_person": item["sales_person"],
                     "quantity": item["quantity"],
                     "amount": item["amount"],
                 })
@@ -5081,8 +5084,8 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
 
                 for c in p["clients"]:
                     lines.append(
-                        f"   - {c['client_name']}: {c['quantity']:,.0f} Qty, "
-                        f"Rs {c['amount']:,.0f}"
+                        f"   - {c['client_name']} | Salesperson: {c['sales_person']}: "
+                        f"{c['quantity']:,.0f} Qty, Rs {c['amount']:,.0f}"
                     )
 
             who = salesperson or selected_team or "Overall"
