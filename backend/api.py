@@ -3933,17 +3933,24 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
         wants_call_phone = any(w in q_lower for w in ["call", "phone", "on call", "on phone", "telephonic", "whatsapp call"])
         wants_visit = "visit" in q_lower or "visits" in q_lower
         wants_product = (
-            "product" in q_lower
-            or "products" in q_lower
-            or "product-wise" in q_lower
-            or "product wise" in q_lower
-            or "kon kon si" in q_lower
-            or "details" in q_lower
-            or "breakdown" in q_lower
-            or bool(product)
+            (
+                "product" in q_lower
+                or "products" in q_lower
+                or "product-wise" in q_lower
+                or "product wise" in q_lower
+                or "kon kon si" in q_lower
+                or "details" in q_lower
+                or "breakdown" in q_lower
+                or bool(product)
+            )
+            and not wants_target
         )
         wants_client = any(w in q_lower for w in ["client", "clients", "customer", "customers", "party", "parties"]) or bool(client)
-        wants_target = any(w in q_lower for w in ["target", "progress", "direction", "achievement", "remaining", "short"])
+        wants_target = any(w in q_lower for w in [
+            "target", "targets", "progress", "direction", "achievement",
+            "achieved", "remaining", "short", "month target",
+            "monthly target", "target report", "target details"
+        ])
         wants_team = "team" in q_lower
 
         # -----------------------------
@@ -4658,171 +4665,9 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                     "weak_clients": weak_clients[:30],
                 },
             }
-        # -----------------------------
-        # 6) Product-wise sales
-        # -----------------------------
-        if wants_product:
-            cur.execute(f"""
-                SELECT
-                    product,
-                    client_name,
-                    COALESCE(SUM(quantity), 0) AS total_qty,
-                    COALESCE(SUM(amount), 0) AS total_amount,
-                    COUNT(*) AS entries_count
-                FROM sales_entries
-                WHERE {sales_where}
-                GROUP BY product, client_name
-                ORDER BY product, COALESCE(SUM({achieved_field}), 0) DESC
-                LIMIT 200
-            """, tuple(sales_params))
-
-            rows = cur.fetchall()
-
-            product_client_data = [
-                {
-                    "product": r[0],
-                    "client_name": r[1],
-                    "quantity": float(r[2] or 0),
-                    "amount": float(r[3] or 0),
-                    "entries_count": int(r[4] or 0),
-                }
-                for r in rows
-            ]
-
-            product_summary = {}
-            for item in product_client_data:
-                p = item["product"] or "Unknown Product"
-                if p not in product_summary:
-                    product_summary[p] = {
-                        "product": p,
-                        "quantity": 0,
-                        "amount": 0,
-                        "clients_count": 0,
-                        "clients": [],
-                    }
-
-                product_summary[p]["quantity"] += item["quantity"]
-                product_summary[p]["amount"] += item["amount"]
-                product_summary[p]["clients_count"] += 1
-                product_summary[p]["clients"].append({
-                    "client_name": item["client_name"],
-                    "quantity": item["quantity"],
-                    "amount": item["amount"],
-                })
-
-            products_list = list(product_summary.values())
-
-            total_qty = sum(x["quantity"] for x in products_list)
-            total_amount = sum(x["amount"] for x in products_list)
-
-            lines = []
-            for i, p in enumerate(products_list, start=1):
-                lines.append(
-                    f"{i}. {p['product']} — Total Qty {p['quantity']:,.0f}, "
-                    f"Amount Rs {p['amount']:,.0f}, Clients {p['clients_count']}"
-                )
-
-                for c in p["clients"]:
-                    lines.append(
-                        f"   - {c['client_name']}: {c['quantity']:,.0f} Qty, "
-                        f"Rs {c['amount']:,.0f}"
-                    )
-
-            who = salesperson or selected_team or "Overall"
-
-            answer = reply(
-                f"{who} product-wise sales with client details for {period_text_en}:\n"
-                f"Products Sold: {len(products_list)}\n"
-                f"Total Qty: {total_qty:,.0f}\n"
-                f"Total Amount: Rs {total_amount:,.0f}\n\n"
-                + ("\n".join(lines) if lines else "No product-wise sales data found."),
-                f"{who} ki {period_text_ru} product-wise sales client details ke sath:\n"
-                f"Products Sold: {len(products_list)}\n"
-                f"Total Qty: {total_qty:,.0f}\n"
-                f"Total Amount: Rs {total_amount:,.0f}\n\n"
-                + ("\n".join(lines) if lines else "Product-wise sales data nahi mila.")
-            )
-
-            return {
-                "answer": answer,
-                "data": {
-                    "type": "product_sales_with_clients",
-                    "team": selected_team,
-                    "salesperson": salesperson,
-                    "period": period_text_en,
-                    "products_sold": len(products_list),
-                    "total_qty": total_qty,
-                    "total_amount": total_amount,
-                    "products": products_list,
-                },
-            }
 
         # -----------------------------
-        # 7) Client-wise sales
-        # -----------------------------
-        if wants_client:
-            cur.execute(f"""
-                SELECT
-                    client_name,
-                    COALESCE(SUM(quantity), 0) AS total_qty,
-                    COALESCE(SUM(amount), 0) AS total_amount,
-                    COUNT(DISTINCT product) AS products_count,
-                    COUNT(DISTINCT sales_person) AS salespersons_count
-                FROM sales_entries
-                WHERE {sales_where}
-                GROUP BY client_name
-                ORDER BY COALESCE(SUM({achieved_field}), 0) DESC
-                LIMIT 50
-            """, tuple(sales_params))
-
-            client_data = [
-                {
-                    "client_name": r[0],
-                    "quantity": float(r[1] or 0),
-                    "amount": float(r[2] or 0),
-                    "products_count": int(r[3] or 0),
-                    "salespersons_count": int(r[4] or 0),
-                }
-                for r in cur.fetchall()
-            ]
-
-            total_qty = sum(x["quantity"] for x in client_data)
-            total_amount = sum(x["amount"] for x in client_data)
-
-            lines = [
-                f"{i+1}. {x['client_name']}: {x['quantity']:,.0f} Qty (Rs {x['amount']:,.0f}), Products {x['products_count']}"
-                for i, x in enumerate(client_data)
-            ]
-
-            who = salesperson or product or selected_team or "Overall"
-
-            answer = reply(
-                f"{who} client-wise sales for {period_text_en}:\n"
-                f"Total Qty: {total_qty:,.0f}\n"
-                f"Total Amount: Rs {total_amount:,.0f}\n\n"
-                + ("\n".join(lines) if lines else "No client-wise sales data found."),
-                f"{who} ki {period_text_ru} client-wise sales:\n"
-                f"Total Qty: {total_qty:,.0f}\n"
-                f"Total Amount: Rs {total_amount:,.0f}\n\n"
-                + ("\n".join(lines) if lines else "Client-wise sales data nahi mila.")
-            )
-
-            return {
-                "answer": answer,
-                "data": {
-                    "type": "client_sales",
-                    "team": selected_team,
-                    "salesperson": salesperson,
-                    "product": product,
-                    "period": period_text_en,
-                    "total_qty": total_qty,
-                    "total_amount": total_amount,
-                    "clients": client_data,
-                },
-            }
-
-        # -----------------------------
-        # 8) Target / progress / team performance
+        # 6) Target / progress / team performance
         # -----------------------------
         if wants_target or wants_team:
             cur.execute(f"""
@@ -4952,6 +4797,169 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                     "achievement_percent": round(percent, 2),
                     "remaining": remaining,
                     "salespersons": salespersons[:20],
+                },
+            }
+
+        # -----------------------------
+        # 7) Product-wise sales
+        # -----------------------------
+        if wants_product:
+            cur.execute(f"""
+                SELECT
+                    product,
+                    client_name,
+                    COALESCE(SUM(quantity), 0) AS total_qty,
+                    COALESCE(SUM(amount), 0) AS total_amount,
+                    COUNT(*) AS entries_count
+                FROM sales_entries
+                WHERE {sales_where}
+                GROUP BY product, client_name
+                ORDER BY product, COALESCE(SUM({achieved_field}), 0) DESC
+                LIMIT 200
+            """, tuple(sales_params))
+
+            rows = cur.fetchall()
+
+            product_client_data = [
+                {
+                    "product": r[0],
+                    "client_name": r[1],
+                    "quantity": float(r[2] or 0),
+                    "amount": float(r[3] or 0),
+                    "entries_count": int(r[4] or 0),
+                }
+                for r in rows
+            ]
+
+            product_summary = {}
+            for item in product_client_data:
+                p = item["product"] or "Unknown Product"
+                if p not in product_summary:
+                    product_summary[p] = {
+                        "product": p,
+                        "quantity": 0,
+                        "amount": 0,
+                        "clients_count": 0,
+                        "clients": [],
+                    }
+
+                product_summary[p]["quantity"] += item["quantity"]
+                product_summary[p]["amount"] += item["amount"]
+                product_summary[p]["clients_count"] += 1
+                product_summary[p]["clients"].append({
+                    "client_name": item["client_name"],
+                    "quantity": item["quantity"],
+                    "amount": item["amount"],
+                })
+
+            products_list = list(product_summary.values())
+
+            total_qty = sum(x["quantity"] for x in products_list)
+            total_amount = sum(x["amount"] for x in products_list)
+
+            lines = []
+            for i, p in enumerate(products_list, start=1):
+                lines.append(
+                    f"{i}. {p['product']} — Total Qty {p['quantity']:,.0f}, "
+                    f"Amount Rs {p['amount']:,.0f}, Clients {p['clients_count']}"
+                )
+
+                for c in p["clients"]:
+                    lines.append(
+                        f"   - {c['client_name']}: {c['quantity']:,.0f} Qty, "
+                        f"Rs {c['amount']:,.0f}"
+                    )
+
+            who = salesperson or selected_team or "Overall"
+
+            answer = reply(
+                f"{who} product-wise sales with client details for {period_text_en}:\n"
+                f"Products Sold: {len(products_list)}\n"
+                f"Total Qty: {total_qty:,.0f}\n"
+                f"Total Amount: Rs {total_amount:,.0f}\n\n"
+                + ("\n".join(lines) if lines else "No product-wise sales data found."),
+                f"{who} ki {period_text_ru} product-wise sales client details ke sath:\n"
+                f"Products Sold: {len(products_list)}\n"
+                f"Total Qty: {total_qty:,.0f}\n"
+                f"Total Amount: Rs {total_amount:,.0f}\n\n"
+                + ("\n".join(lines) if lines else "Product-wise sales data nahi mila.")
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "product_sales_with_clients",
+                    "team": selected_team,
+                    "salesperson": salesperson,
+                    "period": period_text_en,
+                    "products_sold": len(products_list),
+                    "total_qty": total_qty,
+                    "total_amount": total_amount,
+                    "products": products_list,
+                },
+            }
+
+        # -----------------------------
+        # 8) Client-wise sales
+        # -----------------------------
+        if wants_client:
+            cur.execute(f"""
+                SELECT
+                    client_name,
+                    COALESCE(SUM(quantity), 0) AS total_qty,
+                    COALESCE(SUM(amount), 0) AS total_amount,
+                    COUNT(DISTINCT product) AS products_count,
+                    COUNT(DISTINCT sales_person) AS salespersons_count
+                FROM sales_entries
+                WHERE {sales_where}
+                GROUP BY client_name
+                ORDER BY COALESCE(SUM({achieved_field}), 0) DESC
+                LIMIT 50
+            """, tuple(sales_params))
+
+            client_data = [
+                {
+                    "client_name": r[0],
+                    "quantity": float(r[1] or 0),
+                    "amount": float(r[2] or 0),
+                    "products_count": int(r[3] or 0),
+                    "salespersons_count": int(r[4] or 0),
+                }
+                for r in cur.fetchall()
+            ]
+
+            total_qty = sum(x["quantity"] for x in client_data)
+            total_amount = sum(x["amount"] for x in client_data)
+
+            lines = [
+                f"{i+1}. {x['client_name']}: {x['quantity']:,.0f} Qty (Rs {x['amount']:,.0f}), Products {x['products_count']}"
+                for i, x in enumerate(client_data)
+            ]
+
+            who = salesperson or product or selected_team or "Overall"
+
+            answer = reply(
+                f"{who} client-wise sales for {period_text_en}:\n"
+                f"Total Qty: {total_qty:,.0f}\n"
+                f"Total Amount: Rs {total_amount:,.0f}\n\n"
+                + ("\n".join(lines) if lines else "No client-wise sales data found."),
+                f"{who} ki {period_text_ru} client-wise sales:\n"
+                f"Total Qty: {total_qty:,.0f}\n"
+                f"Total Amount: Rs {total_amount:,.0f}\n\n"
+                + ("\n".join(lines) if lines else "Client-wise sales data nahi mila.")
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "client_sales",
+                    "team": selected_team,
+                    "salesperson": salesperson,
+                    "product": product,
+                    "period": period_text_en,
+                    "total_qty": total_qty,
+                    "total_amount": total_amount,
+                    "clients": client_data,
                 },
             }
 
