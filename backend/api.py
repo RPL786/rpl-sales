@@ -4176,8 +4176,14 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
         # 2) Comparison answer
         # -----------------------------
         if wants_comparison:
+            wants_month_wise_comparison = any(w in q_lower for w in [
+                "month-wise", "month wise", "monthly", "month by month",
+                "kis kis month", "which months", "month range", "full year"
+            ]) or not month
+
             comp_where, comp_params = sales_filter(use_compare_years=True)
 
+            # Year-wise total comparison
             cur.execute(f"""
                 SELECT
                     year,
@@ -4204,24 +4210,63 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 for r in cur.fetchall()
             ]
 
-            lines_en = []
-            lines_ru = []
+            # Month-wise comparison for Full Year / month-wise questions
+            month_wise_data = []
 
+            if wants_month_wise_comparison:
+                cur.execute(f"""
+                    SELECT
+                        year,
+                        month,
+                        COALESCE(SUM(quantity), 0) AS total_qty,
+                        COALESCE(SUM(amount), 0) AS total_amount,
+                        COUNT(DISTINCT client_name) AS clients_count,
+                        COUNT(DISTINCT product) AS products_count,
+                        COUNT(DISTINCT sales_person) AS salespersons_count
+                    FROM sales_entries
+                    WHERE {comp_where}
+                    GROUP BY year, month
+                    ORDER BY
+                        year,
+                        CASE month
+                            WHEN 'Jan' THEN 1
+                            WHEN 'Feb' THEN 2
+                            WHEN 'Mar' THEN 3
+                            WHEN 'Apr' THEN 4
+                            WHEN 'May' THEN 5
+                            WHEN 'Jun' THEN 6
+                            WHEN 'Jul' THEN 7
+                            WHEN 'Aug' THEN 8
+                            WHEN 'Sep' THEN 9
+                            WHEN 'Oct' THEN 10
+                            WHEN 'Nov' THEN 11
+                            WHEN 'Dec' THEN 12
+                            ELSE 99
+                        END
+                """, tuple(comp_params))
+
+                month_wise_data = [
+                    {
+                        "year": int(r[0]),
+                        "month": r[1],
+                        "total_qty": float(r[2] or 0),
+                        "total_amount": float(r[3] or 0),
+                        "clients_count": int(r[4] or 0),
+                        "products_count": int(r[5] or 0),
+                        "salespersons_count": int(r[6] or 0),
+                    }
+                    for r in cur.fetchall()
+                ]
+
+            yearly_lines = []
             for item in comparison_data:
-                lines_en.append(
-                    f"{item['year']}: Qty {item['total_qty']:,.0f}, "
-                    f"Amount Rs {item['total_amount']:,.0f}, "
-                    f"Clients {item['clients_count']}, Products {item['products_count']}"
-                )
-                lines_ru.append(
+                yearly_lines.append(
                     f"{item['year']}: Qty {item['total_qty']:,.0f}, "
                     f"Amount Rs {item['total_amount']:,.0f}, "
                     f"Clients {item['clients_count']}, Products {item['products_count']}"
                 )
 
-            growth_en = ""
-            growth_ru = ""
-
+            growth_text = ""
             if len(comparison_data) >= 2:
                 old = comparison_data[0]
                 new = comparison_data[-1]
@@ -4232,25 +4277,52 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 qty_growth = (qty_diff / old["total_qty"] * 100) if old["total_qty"] else 0
                 amount_growth = (amount_diff / old["total_amount"] * 100) if old["total_amount"] else 0
 
-                growth_en = (
-                    f"\n\nGrowth:\n"
+                growth_text = (
+                    f"\n\nGrowth / Difference:\n"
                     f"Qty Difference: {qty_diff:,.0f} ({qty_growth:.1f}%)\n"
                     f"Amount Difference: Rs {amount_diff:,.0f} ({amount_growth:.1f}%)"
                 )
 
-                growth_ru = (
-                    f"\n\nGrowth:\n"
-                    f"Qty Difference: {qty_diff:,.0f} ({qty_growth:.1f}%)\n"
-                    f"Amount Difference: Rs {amount_diff:,.0f} ({amount_growth:.1f}%)"
-                )
+            month_lines = []
+
+            if month_wise_data:
+                months_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                years_available = sorted(list(set([x["year"] for x in month_wise_data])))
+
+                for m in months_order:
+                    rows_for_month = [x for x in month_wise_data if x["month"] == m]
+                    if not rows_for_month:
+                        continue
+
+                    month_lines.append(f"\n{m}:")
+                    for y in years_available:
+                        row = next((x for x in rows_for_month if x["year"] == y), None)
+                        if row:
+                            month_lines.append(
+                                f"- {y}: Qty {row['total_qty']:,.0f}, "
+                                f"Amount Rs {row['total_amount']:,.0f}, "
+                                f"Clients {row['clients_count']}, Products {row['products_count']}"
+                            )
 
             answer = reply(
                 f"Comparison report for {month or 'Full Year'}:\n\n"
-                + ("\n".join(lines_en) if lines_en else "No comparison data found.")
-                + growth_en,
+                f"Year-wise summary:\n"
+                + ("\n".join(yearly_lines) if yearly_lines else "No comparison data found.")
+                + growth_text
+                + (
+                    "\n\nMonth-wise details:\n" + "\n".join(month_lines)
+                    if month_lines
+                    else "\n\nMonth-wise details: No month-wise comparison data found."
+                ),
                 f"{month or 'Full Year'} comparison report:\n\n"
-                + ("\n".join(lines_ru) if lines_ru else "Comparison data nahi mila.")
-                + growth_ru
+                f"Year-wise summary:\n"
+                + ("\n".join(yearly_lines) if yearly_lines else "Comparison data nahi mila.")
+                + growth_text
+                + (
+                    "\n\nMonth-wise details:\n" + "\n".join(month_lines)
+                    if month_lines
+                    else "\n\nMonth-wise details nahi mili."
+                )
             )
 
             return {
@@ -4264,9 +4336,9 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                     "month": month or "Full Year",
                     "years": compare_years,
                     "comparison": comparison_data,
+                    "month_wise_comparison": month_wise_data,
                 },
             }
-
         # -----------------------------
         # 3) On-call / phone notes answer
         # -----------------------------
