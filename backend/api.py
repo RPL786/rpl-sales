@@ -3915,9 +3915,16 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
         wants_count = any(w in q_lower for w in ["how many", "count", "kitne", "kitni", "kitna"])
         wants_salesperson_count = wants_count and any(w in q_lower for w in ["salesperson", "sales person", "salespersons", "sales persons"])
         wants_client_count = wants_count and any(w in q_lower for w in ["client", "clients", "customer", "customers", "party", "parties"])
+
         wants_details = any(w in q_lower for w in [
             "detail", "details", "detailed", "list", "breakdown",
             "kon kon", "which", "wise", "product-wise", "product wise"
+        ])
+
+        wants_target = any(w in q_lower for w in [
+            "target", "targets", "progress", "direction", "achievement",
+            "achieved", "remaining", "short", "month target",
+            "monthly target", "target report", "target details"
         ])
 
         wants_product_count = (
@@ -3926,12 +3933,15 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             and not wants_details
             and "sales" not in q_lower
             and "sale" not in q_lower
+            and not wants_target
         )
+
         wants_team_count = wants_count and "team" in q_lower
 
         wants_visit_audit = any(w in q_lower for w in ["fake", "audit", "suspicious", "jhooti", "jhoot", "verify", "verification"])
         wants_call_phone = any(w in q_lower for w in ["call", "phone", "on call", "on phone", "telephonic", "whatsapp call"])
         wants_visit = "visit" in q_lower or "visits" in q_lower
+
         wants_product = (
             (
                 "product" in q_lower
@@ -3945,12 +3955,8 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             )
             and not wants_target
         )
+
         wants_client = any(w in q_lower for w in ["client", "clients", "customer", "customers", "party", "parties"]) or bool(client)
-        wants_target = any(w in q_lower for w in [
-            "target", "targets", "progress", "direction", "achievement",
-            "achieved", "remaining", "short", "month target",
-            "monthly target", "target report", "target details"
-        ])
         wants_team = "team" in q_lower
 
         # -----------------------------
