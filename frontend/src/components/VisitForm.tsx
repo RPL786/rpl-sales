@@ -468,7 +468,8 @@ export default function VisitForm() {
                     <option>Industrial</option>
                     <option>Distributor</option>
                     <option>Dealer</option>
-                    <option>Applicator</option>
+                    <option>Applicator/Contractor</option>
+                    <option>Architect/Consultant</option>
                     <option>Home / Project Owner</option>
                     <option>Other</option>
                   </select>
