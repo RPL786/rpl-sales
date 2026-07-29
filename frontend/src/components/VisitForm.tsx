@@ -91,6 +91,9 @@ export default function VisitForm() {
   const [meetingDate, setMeetingDate] = useState(todayDate());
   const [rows, setRows] = useState<VisitRow[]>(Array.from({ length: 5 }, () => ({ ...emptyRow })));
   const [openProductRow, setOpenProductRow] = useState<number | null>(null);
+  const [clientSearch, setClientSearch] = useState<{ [key: number]: string }>({});
+  const [productSearch, setProductSearch] = useState<{ [key: number]: string }>({});
+  const [openClientRow, setOpenClientRow] = useState<number | null>(null);
 
   const [visits, setVisits] = useState<VisitEntry[]>([]);
   const [message, setMessage] = useState("");
@@ -452,14 +455,53 @@ export default function VisitForm() {
               <tr key={index}>
                 <td>{index + 1}</td>
                 <td>
-                  <select className="filter-select" value={row.client_name} onChange={(e) => updateRow(index, "client_name", e.target.value)}>
-                    <option value="">Select Client</option>
-                    {clients.map((client) => (
-                      <option key={client.id} value={client.name}>
-                        {client.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="search-dropdown">
+                    <button
+                      type="button"
+                      className="dropdown-button"
+                      onClick={() => setOpenClientRow(openClientRow === index ? null : index)}
+                    >
+                      {row.client_name || "Select Client"}
+                    </button>
+
+                    {openClientRow === index && (
+                      <div className="dropdown-panel">
+                        <input
+                          className="dropdown-search"
+                          placeholder="Search client..."
+                          value={clientSearch[index] || ""}
+                          onChange={(e) =>
+                            setClientSearch((prev) => ({
+                              ...prev,
+                              [index]: e.target.value,
+                            }))
+                          }
+                        />
+
+                        <div className="dropdown-list">
+                          {clients
+                            .filter((client) =>
+                              String(client.name)
+                                .toLowerCase()
+                                .includes((clientSearch[index] || "").toLowerCase())
+                            )
+                            .map((client) => (
+                              <div
+                                key={client.id}
+                                className="dropdown-item"
+                                onClick={() => {
+                                  updateRow(index, "client_name", client.name);
+                                  setOpenClientRow(null);
+                                  setClientSearch((prev) => ({ ...prev, [index]: "" }));
+                                }}
+                              >
+                                {client.name}
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </td>
                 <td>
                   <select className="filter-select" value={row.client_category} onChange={(e) => updateRow(index, "client_category", e.target.value)}>
@@ -509,12 +551,34 @@ export default function VisitForm() {
                           padding: 8,
                         }}
                       >
-                        {products.length === 0 ? (
+                        <input
+                          className="dropdown-search"
+                          placeholder="Search product..."
+                          value={productSearch[index] || ""}
+                          onChange={(e) =>
+                            setProductSearch((prev) => ({
+                              ...prev,
+                              [index]: e.target.value,
+                            }))
+                          }
+                        />
+                        {products.filter((product) =>
+                          String(product.name)
+                            .toLowerCase()
+                            .includes((productSearch[index] || "").toLowerCase())
+                        ).length === 0 ? (
+                        
                           <div style={{ fontSize: 13, color: "#6b7280", padding: 8 }}>
                             No products found
                           </div>
                         ) : (
-                          products.map((product) => {
+                          products
+                            .filter((product) =>
+                              String(product.name)
+                                .toLowerCase()
+                                .includes((productSearch[index] || "").toLowerCase())
+                            )
+                            .map((product) => {
                             const selectedProducts = row.product
                               .split(",")
                               .map((p) => p.trim())
