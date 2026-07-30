@@ -96,6 +96,7 @@ export default function VisitForm() {
   const [openClientRow, setOpenClientRow] = useState<number | null>(null);
 
   const [visits, setVisits] = useState<VisitEntry[]>([]);
+  const [editingVisitId, setEditingVisitId] = useState<number | null>(null);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [searchText, setSearchText] = useState("");
@@ -312,6 +313,46 @@ export default function VisitForm() {
     }
   };
 
+  const startEditVisit = (visit: VisitEntry) => {
+    if (!isAdmin) return;
+
+    setEditingVisitId(visit.id);
+    setTeam(visit.team || "");
+    setSalesPerson(visit.sales_person || "");
+    setMeetingDate(visit.meeting_date || todayDate());
+
+    setRows([
+      {
+        client_name: visit.client_name || "",
+        client_category: visit.client_category || "",
+        product: visit.product || "",
+        meeting_time: visit.meeting_time || "",
+        meeting_type: visit.meeting_type || "",
+        meeting_status: visit.meeting_status || "",
+        client_response: visit.client_response || "",
+        order_amount: String(visit.order_amount || ""),
+        quantity: String(visit.quantity || ""),
+        future_potential: String(visit.future_potential || ""),
+        next_meeting_date: visit.next_meeting_date || "",
+        next_meeting_time: visit.next_meeting_time || "",
+        notes: visit.notes || "",
+      },
+    ]);
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const cancelEditVisit = () => {
+    setEditingVisitId(null);
+    clearRows();
+    setMeetingDate(todayDate());
+
+    if (canSelectTeamAndSalesPerson) {
+      setTeam("");
+      setSalesPerson("");
+    }
+  };
+  
   const deleteVisit = async (id: number) => {
     if (!isAdmin) return;
     if (!window.confirm("Delete this visit?")) return;
@@ -702,8 +743,23 @@ export default function VisitForm() {
         </div>
 
         <button className="action-btn primary-btn" onClick={saveAllVisits} disabled={saving}>
-          {saving ? "Saving..." : `Save All Visits (${completedRows.length})`}
+          {saving
+            ? "Saving..."
+            : editingVisitId
+            ? "Update Visit"
+            : `Save All Visits (${completedRows.length})`}
         </button>
+
+        {editingVisitId && (
+          <button
+            className="action-btn"
+            type="button"
+            onClick={cancelEditVisit}
+            disabled={saving}
+          >
+            Cancel Edit
+          </button>
+        )}
       </div>
 
       {message && <div className="status success">{message}</div>}
@@ -784,9 +840,15 @@ export default function VisitForm() {
                   <td>{visit.next_meeting_date || "-"}</td>
                   {isAdmin && (
                     <td>
-                      <button className="action-btn" onClick={() => deleteVisit(visit.id)}>
-                        Delete
-                      </button>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button className="action-btn" onClick={() => startEditVisit(visit)}>
+                          Edit
+                        </button>
+
+                        <button className="action-btn" onClick={() => deleteVisit(visit.id)}>
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   )}
                 </tr>
