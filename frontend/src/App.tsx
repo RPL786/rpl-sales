@@ -1386,6 +1386,138 @@ const productSelectionLabel =
   };
 
   const exportPdf = () => window.print();
+  
+  const getReportSubtitle = () => {
+    const salesText = selectedSalesPerson === "all" ? "All Sales Persons" : selectedSalesPerson;
+    const productText = selectedProducts.length === 0 ? "All Products" : `${selectedProducts.length} Products`;
+    const monthText = selectedMonth === "all" ? "All Months" : selectedMonth;
+    const teamText = selectedTeam || "All Teams";
+
+    return `Team: ${teamText} | Sales Person: ${salesText} | Month: ${monthText} | Products: ${productText} | View: ${getViewLabel()}`;
+  };
+
+  const downloadClientDrilldownPdf = () => {
+    const doc = new jsPDF("l", "mm", "a4");
+
+    doc.setFontSize(16);
+    doc.text("Client Drilldown Report", 14, 14);
+
+    doc.setFontSize(9);
+    doc.text(getReportSubtitle(), 14, 22);
+    doc.text(`Total Clients: ${filteredClientDrilldown.length}`, 14, 28);
+
+    const rows = filteredClientDrilldown.map((client) => {
+      const monthRow =
+        selectedMonth === "all"
+          ? null
+          : client.monthly_trend.find((m) => m.month === selectedMonth);
+
+      const previousValue =
+        selectedMonth === "all"
+          ? client.previous_year_quantity
+          : monthRow?.previous || 0;
+
+      const currentValue =
+        selectedMonth === "all"
+          ? client.current_year_quantity
+          : monthRow?.current || 0;
+
+      const deltaValue = currentValue - previousValue;
+
+      return [
+        client.name,
+        client.status,
+        client.assigned_sales_person,
+        client.dominant_product,
+        formatNumber(previousValue),
+        formatNumber(currentValue),
+        formatNumber(deltaValue),
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 34,
+      head: [["Client", "Status", "Sales Person", "Product", String(previousYearLabel), String(currentYearLabel), "Delta"]],
+      body: rows,
+      styles: {
+        fontSize: 7,
+        cellPadding: 2,
+      },
+      headStyles: {
+        fillColor: [30, 64, 175],
+        textColor: 255,
+      },
+      columnStyles: {
+        0: { cellWidth: 58 },
+        1: { cellWidth: 20 },
+        2: { cellWidth: 35 },
+        3: { cellWidth: 45 },
+      },
+    });
+
+    doc.save("client-drilldown-report.pdf");
+  };
+
+  const downloadProductIntelligencePdf = () => {
+    const doc = new jsPDF("l", "mm", "a4");
+
+    doc.setFontSize(16);
+    doc.text("Product Intelligence Report", 14, 14);
+
+    doc.setFontSize(9);
+    doc.text(getReportSubtitle(), 14, 22);
+    doc.text(`Total Products: ${filteredProductDrilldown.length}`, 14, 28);
+
+    const rows = filteredProductDrilldown.map((product) => {
+      const monthRow =
+        selectedMonth === "all"
+          ? null
+          : product.monthly_trend.find((m) => m.month === selectedMonth);
+
+      const previousValue =
+        selectedMonth === "all"
+          ? product.last_year_sales
+          : monthRow?.previous || 0;
+
+      const currentValue =
+        selectedMonth === "all"
+          ? product.this_year_sales
+          : monthRow?.current || 0;
+
+      const deltaValue = currentValue - previousValue;
+      const growthValue = getGrowthPercent(previousValue, currentValue);
+
+      return [
+        product.name,
+        formatNumber(previousValue),
+        formatNumber(currentValue),
+        formatNumber(deltaValue),
+        formatPercent(growthValue),
+        String(product.client_count),
+        product.top_sales_person,
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 34,
+      head: [["Product", String(previousYearLabel), String(currentYearLabel), "Delta", "Growth", "Clients", "Top Sales Person"]],
+      body: rows,
+      styles: {
+        fontSize: 7,
+        cellPadding: 2,
+      },
+      headStyles: {
+        fillColor: [30, 64, 175],
+        textColor: 255,
+      },
+      columnStyles: {
+        0: { cellWidth: 70 },
+        6: { cellWidth: 35 },
+      },
+    });
+
+    doc.save("product-intelligence-report.pdf");
+  };
 
   const renderPagination = (
     page: number,
@@ -1669,6 +1801,14 @@ const productSelectionLabel =
               <p className="section-subtext">Kaunsa client kis product me gira ya grow hua</p>
             </div>
             <span className="soft-counter">{filteredClientDrilldown.length} clients</span>
+            <button
+              type="button"
+              className="ai-export-btn"
+              onClick={downloadClientDrilldownPdf}
+            >
+              <Download size={14} />
+              PDF
+            </button>
           </div>
           <div className="table-wrap">
             <table className="data-table">
@@ -1906,6 +2046,14 @@ const productSelectionLabel =
             <h2>Product Intelligence</h2>
             <p className="section-subtext">Product-wise monthly trend, client count, and owner</p>
           </div>
+          <button
+            type="button"
+            className="ai-export-btn"
+            onClick={downloadProductIntelligencePdf}
+          >
+            <Download size={14} />
+            PDF
+          </button>
         </div>
         <div className="product-grid">
           {pagedProductDrilldown.items.map((product) => {
