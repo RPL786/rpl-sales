@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import jsPDF from "jspdf";
+import "jspdf-autotable";
 
 const API_BASE_URL = "";
 
@@ -422,6 +424,114 @@ export default function VisitForm() {
       return bTime.localeCompare(aTime);
     });
 
+    const getVisitRemark = (visit: VisitEntry) => {
+      if (visit.meeting_status === "Order Received") return "Closed - Order Received";
+      if (visit.meeting_status === "Rejected") return "Closed - Client Rejected";
+      if (visit.meeting_status === "Closed") return "Closed";
+      if (visit.notes && visit.notes.trim()) return visit.notes;
+      if (visit.meeting_status === "Need Follow-up") return "Need Follow-up";
+      if (visit.meeting_status === "No Response") return "Need Follow-up";
+      if (visit.meeting_status === "Interested") return "Meeting Pending";
+      if (visit.meeting_status === "Thinking") return "Need Follow-up";
+      return "Need Follow-up";
+    };
+
+    const downloadFollowupPdf = () => {
+      try {
+        if (!isAdmin) return;
+
+        if (!filteredVisits.length) {
+          alert("PDF ke liye koi visit data available nahi hai.");
+          return;
+        }
+
+        const grouped = new Map<string, VisitEntry[]>();
+
+        filteredVisits.forEach((visit) => {
+          const key = [
+            visit.sales_person || "",
+            visit.client_name || "",
+            visit.product || "",
+          ].join("__");
+
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key)?.push(visit);
+        });
+
+        const reportRows = Array.from(grouped.values()).map((items) => {
+          const sorted = [...items].sort((a, b) => {
+            const aTime = `${a.meeting_date || ""} ${a.meeting_time || ""}`;
+            const bTime = `${b.meeting_date || ""} ${b.meeting_time || ""}`;
+            return aTime.localeCompare(bTime);
+          });
+
+          const latest = sorted[sorted.length - 1];
+
+          return [
+            latest.sales_person || "-",
+            latest.client_name || "-",
+            latest.product || "-",
+            sorted[0]?.meeting_date || "-",
+            sorted[1]?.meeting_date || "-",
+            sorted[2]?.meeting_date || "-",
+            sorted[3]?.meeting_date || "-",
+            latest.meeting_date || "-",
+            String(sorted.length),
+            latest.meeting_status || "-",
+            getVisitRemark(latest),
+          ];
+        });
+
+        const doc = new jsPDF("l", "mm", "a4");
+
+        doc.setFontSize(16);
+        doc.text("Sales Follow-up Report", 14, 14);
+
+        doc.setFontSize(9);
+        doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 22);
+        doc.text(`Date Filter: ${dateFrom || "Start"} to ${dateTo || "End"}`, 14, 28);
+        doc.text(`Total Rows: ${reportRows.length}`, 14, 34);
+
+        (doc as any).autoTable({
+          startY: 40,
+          head: [[
+            "Sales Person",
+            "Client",
+            "Product",
+            "1st Visit",
+            "Follow-up 1",
+            "Follow-up 2",
+            "Follow-up 3",
+            "Last Visit",
+            "Total Visits",
+            "Current Status",
+            "Key Remark",
+          ]],
+          body: reportRows,
+          styles: {
+            fontSize: 6,
+            cellPadding: 1.6,
+            overflow: "linebreak",
+          },
+          headStyles: {
+            fillColor: [30, 64, 175],
+            textColor: 255,
+          },
+          columnStyles: {
+            0: { cellWidth: 24 },
+            1: { cellWidth: 34 },
+            2: { cellWidth: 52 },
+            10: { cellWidth: 36 },
+          },
+        });
+
+        doc.save("sales-followup-report.pdf");
+      } catch (err: any) {
+        console.error("Follow-up PDF failed:", err);
+        alert(err?.message || "Follow-up PDF generate nahi hui.");
+      }
+    };
+
   return (
     <div className="card">
       <div className="section-head">
@@ -813,6 +923,16 @@ export default function VisitForm() {
           <p className="section-subtext">Purani aur new saved visits dono yahan show hongi.</p>
         </div>
       </div>
+
+      {isAdmin && (
+        <button
+          className="action-btn primary-btn"
+          type="button"
+          onClick={downloadFollowupPdf}
+        >
+          Follow-up PDF
+        </button>
+      )}
 
       <div className="table-wrap">
         <table className="data-table">
