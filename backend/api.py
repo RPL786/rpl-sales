@@ -3345,7 +3345,7 @@ def update_visit_entry(visit_id: int, payload: VisitEntryRequest, user: dict = D
     try:
         cur.execute("""
             UPDATE visit_entries
-            SET team = %s, sales_person = %s, client_name = %s, product = %s,
+            SET team = %s, sales_person = %s, client_name = %s, client_category = %s, product = %s,
                 meeting_date = %s, meeting_time = %s, meeting_type = %s, meeting_status = %s,
                 client_response = %s, order_amount = %s, quantity = %s, future_potential = %s,
                 next_meeting_date = %s, next_meeting_time = %s, notes = %s
@@ -3354,6 +3354,7 @@ def update_visit_entry(visit_id: int, payload: VisitEntryRequest, user: dict = D
             payload.team.strip(),
             payload.sales_person.strip(),
             payload.client_name.strip(),
+            payload.client_category.strip(),
             payload.product.strip(),
             payload.meeting_date,
             payload.meeting_time,
