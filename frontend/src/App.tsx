@@ -1441,7 +1441,7 @@ const productSelectionLabel =
         ];
       });
 
-      autoTable(doc, {
+      (doc as any).autoTable({
         startY: 34,
         head: [
           [
@@ -1518,7 +1518,7 @@ const productSelectionLabel =
         ];
       });
 
-      autoTable(doc, {
+      (doc as any).autoTable({
         startY: 34,
         head: [
           [
