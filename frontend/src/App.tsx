@@ -1397,126 +1397,156 @@ const productSelectionLabel =
   };
 
   const downloadClientDrilldownPdf = () => {
-    const doc = new jsPDF("l", "mm", "a4");
+    try {
+      if (!filteredClientDrilldown.length) {
+        alert("PDF ke liye koi client data available nahi hai.");
+        return;
+      }
 
-    doc.setFontSize(16);
-    doc.text("Client Drilldown Report", 14, 14);
+      const doc = new jsPDF("l", "mm", "a4");
 
-    doc.setFontSize(9);
-    doc.text(getReportSubtitle(), 14, 22);
-    doc.text(`Total Clients: ${filteredClientDrilldown.length}`, 14, 28);
+      doc.setFontSize(16);
+      doc.text("Client Drilldown Report", 14, 14);
 
-    const rows = filteredClientDrilldown.map((client) => {
-      const monthRow =
-        selectedMonth === "all"
-          ? null
-          : client.monthly_trend.find((m) => m.month === selectedMonth);
+      doc.setFontSize(9);
+      doc.text(getReportSubtitle(), 14, 22);
+      doc.text(`Total Clients: ${filteredClientDrilldown.length}`, 14, 28);
 
-      const previousValue =
-        selectedMonth === "all"
-          ? client.previous_year_quantity
-          : monthRow?.previous || 0;
+      const rows = filteredClientDrilldown.map((client) => {
+        const monthRow =
+          selectedMonth === "all"
+            ? null
+            : client.monthly_trend.find((m) => m.month === selectedMonth);
 
-      const currentValue =
-        selectedMonth === "all"
-          ? client.current_year_quantity
-          : monthRow?.current || 0;
+        const previousValue =
+          selectedMonth === "all"
+            ? client.previous_year_quantity
+            : monthRow?.previous || 0;
 
-      const deltaValue = currentValue - previousValue;
+        const currentValue =
+          selectedMonth === "all"
+            ? client.current_year_quantity
+            : monthRow?.current || 0;
 
-      return [
-        client.name,
-        client.status,
-        client.assigned_sales_person,
-        client.dominant_product,
-        formatNumber(previousValue),
-        formatNumber(currentValue),
-        formatNumber(deltaValue),
-      ];
-    });
+        const deltaValue = currentValue - previousValue;
 
-    autoTable(doc, {
-      startY: 34,
-      head: [["Client", "Status", "Sales Person", "Product", String(previousYearLabel), String(currentYearLabel), "Delta"]],
-      body: rows,
-      styles: {
-        fontSize: 7,
-        cellPadding: 2,
-      },
-      headStyles: {
-        fillColor: [30, 64, 175],
-        textColor: 255,
-      },
-      columnStyles: {
-        0: { cellWidth: 58 },
-        1: { cellWidth: 20 },
-        2: { cellWidth: 35 },
-        3: { cellWidth: 45 },
-      },
-    });
+        return [
+          client.name,
+          client.status,
+          client.assigned_sales_person,
+          client.dominant_product,
+          formatNumber(previousValue),
+          formatNumber(currentValue),
+          formatNumber(deltaValue),
+        ];
+      });
 
-    doc.save("client-drilldown-report.pdf");
+      autoTable(doc, {
+        startY: 34,
+        head: [
+          [
+            "Client",
+            "Status",
+            "Sales Person",
+            "Product",
+            String(previousYearLabel),
+            String(currentYearLabel),
+            "Delta",
+          ],
+        ],
+        body: rows,
+        styles: {
+          fontSize: 7,
+          cellPadding: 2,
+        },
+        headStyles: {
+          fillColor: [30, 64, 175],
+          textColor: 255,
+        },
+      });
+
+      doc.save("client-drilldown-report.pdf");
+    } catch (err: any) {
+      console.error("Client PDF failed:", err);
+      alert(err?.message || "Client PDF generate nahi hui.");
+    }
   };
 
   const downloadProductIntelligencePdf = () => {
-    const doc = new jsPDF("l", "mm", "a4");
+    try {
+      if (!filteredProductDrilldown.length) {
+        alert("PDF ke liye koi product data available nahi hai.");
+        return;
+      }
 
-    doc.setFontSize(16);
-    doc.text("Product Intelligence Report", 14, 14);
+      const doc = new jsPDF("l", "mm", "a4");
 
-    doc.setFontSize(9);
-    doc.text(getReportSubtitle(), 14, 22);
-    doc.text(`Total Products: ${filteredProductDrilldown.length}`, 14, 28);
+      doc.setFontSize(16);
+      doc.text("Product Intelligence Report", 14, 14);
 
-    const rows = filteredProductDrilldown.map((product) => {
-      const monthRow =
-        selectedMonth === "all"
-          ? null
-          : product.monthly_trend.find((m) => m.month === selectedMonth);
+      doc.setFontSize(9);
+      doc.text(getReportSubtitle(), 14, 22);
+      doc.text(`Total Products: ${filteredProductDrilldown.length}`, 14, 28);
 
-      const previousValue =
-        selectedMonth === "all"
-          ? product.last_year_sales
-          : monthRow?.previous || 0;
+      const rows = filteredProductDrilldown.map((product) => {
+        const monthRow =
+          selectedMonth === "all"
+            ? null
+            : product.monthly_trend.find((m) => m.month === selectedMonth);
 
-      const currentValue =
-        selectedMonth === "all"
-          ? product.this_year_sales
-          : monthRow?.current || 0;
+        const previousValue =
+          selectedMonth === "all"
+            ? product.last_year_sales
+            : monthRow?.previous || 0;
 
-      const deltaValue = currentValue - previousValue;
-      const growthValue = getGrowthPercent(previousValue, currentValue);
+        const currentValue =
+          selectedMonth === "all"
+            ? product.this_year_sales
+            : monthRow?.current || 0;
 
-      return [
-        product.name,
-        formatNumber(previousValue),
-        formatNumber(currentValue),
-        formatNumber(deltaValue),
-        formatPercent(growthValue),
-        String(product.client_count),
-        product.top_sales_person,
-      ];
-    });
+        const deltaValue = currentValue - previousValue;
+        const growthValue = getGrowthPercent(previousValue, currentValue);
 
-    autoTable(doc, {
-      startY: 34,
-      head: [["Product", String(previousYearLabel), String(currentYearLabel), "Delta", "Growth", "Clients", "Top Sales Person"]],
-      body: rows,
-      styles: {
-        fontSize: 7,
-        cellPadding: 2,
-      },
-      headStyles: {
-        fillColor: [30, 64, 175],
-        textColor: 255,
-      },
-      columnStyles: {
-        0: { cellWidth: 70 },
-        6: { cellWidth: 35 },
-      },
-    });
+        return [
+          product.name,
+          formatNumber(previousValue),
+          formatNumber(currentValue),
+          formatNumber(deltaValue),
+          formatPercent(growthValue),
+          String(product.client_count),
+          product.top_sales_person,
+        ];
+      });
 
-    doc.save("product-intelligence-report.pdf");
+      autoTable(doc, {
+        startY: 34,
+        head: [
+          [
+            "Product",
+            String(previousYearLabel),
+            String(currentYearLabel),
+            "Delta",
+            "Growth",
+            "Clients",
+            "Top Sales Person",
+          ],
+        ],
+        body: rows,
+        styles: {
+          fontSize: 7,
+          cellPadding: 2,
+        },
+        headStyles: {
+          fillColor: [30, 64, 175],
+          textColor: 255,
+        },
+      });
+
+      doc.save("product-intelligence-report.pdf");
+    } catch (err: any) {
+      console.error("Product PDF failed:", err);
+      alert(err?.message || "Product PDF generate nahi hui.");
+    }
   };
 
   const renderPagination = (
