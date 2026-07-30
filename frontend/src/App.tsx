@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import jsPDF from "jspdf";
-import { autoTable } from "jspdf-autotable";
+import "jspdf-autotable";
 import {
   AlertCircle,
   BarChart3,
