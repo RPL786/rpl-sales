@@ -291,6 +291,27 @@ export default function VisitForm() {
         notes: row.notes,
       }));
 
+      if (editingVisitId) {
+        const res = await fetch(`${API_BASE_URL}/api/visit-entry/${editingVisitId}`, {
+          method: "PUT",
+          headers: authHeaders(true),
+          body: JSON.stringify(payload[0]),
+        });
+
+        const result = await res.json();
+        if (!res.ok) {
+          setMessage(result.detail || "Visit update failed");
+          return;
+        }
+
+        setMessage("Visit updated successfully.");
+        setEditingVisitId(null);
+        clearRows();
+        setMeetingDate(todayDate());
+        loadVisits();
+        return;
+      }
+
       const res = await fetch(`${API_BASE_URL}/api/visit-entries/bulk`, {
         method: "POST",
         headers: authHeaders(true),
