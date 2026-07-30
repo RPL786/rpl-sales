@@ -627,14 +627,27 @@ export default function VisitForm() {
                   </select>
                 </td>
                 <td>
-                  <select className="filter-select" value={row.meeting_status} onChange={(e) => updateRow(index, "meeting_status", e.target.value)}>
+                  <select
+                    className="filter-select"
+                    value={row.meeting_status}
+                    onChange={(e) => {
+                      const status = e.target.value;
+                      updateRow(index, "meeting_status", status);
+
+                      if (status === "Order Received" || status === "Rejected" || status === "Closed") {
+                        updateRow(index, "next_meeting_date", "");
+                        updateRow(index, "next_meeting_time", "");
+                      }
+                    }}
+                  >
                     <option value="">Select</option>
                     <option>Interested</option>
                     <option>Thinking</option>
-                    <option>No Response</option>
-                    <option>Rejected</option>
                     <option>Need Follow-up</option>
+                    <option>No Response</option>
                     <option>Order Received</option>
+                    <option>Rejected</option>
+                    <option>Closed</option>
                   </select>
                 </td>
                 <td>
@@ -650,7 +663,17 @@ export default function VisitForm() {
                   />
                 </td>
                 <td>
-                  <input className="filter-select" type="date" value={row.next_meeting_date} onChange={(e) => updateRow(index, "next_meeting_date", e.target.value)} />
+                  <input
+                    className="filter-select"
+                    type="date"
+                    value={row.next_meeting_date}
+                    disabled={
+                      row.meeting_status === "Order Received" ||
+                      row.meeting_status === "Rejected" ||
+                      row.meeting_status === "Closed"
+                    }
+                    onChange={(e) => updateRow(index, "next_meeting_date", e.target.value)}
+                  />
                 </td>
                 <td>
                   <input className="filter-select" placeholder="Notes" value={row.notes} onChange={(e) => updateRow(index, "notes", e.target.value)} />
@@ -740,7 +763,14 @@ export default function VisitForm() {
                 <tr
                   key={visit.id}
                   style={{
-                    background: visit.meeting_status === "Need Follow-up" ? "rgba(245, 158, 11, 0.12)" : undefined,
+                    background:
+                      visit.meeting_status === "Need Follow-up"
+                        ? "rgba(245, 158, 11, 0.12)"
+                        : visit.meeting_status === "Order Received"
+                        ? "rgba(16, 185, 129, 0.12)"
+                        : visit.meeting_status === "Rejected" || visit.meeting_status === "Closed"
+                        ? "rgba(239, 68, 68, 0.10)"
+                        : undefined,
                   }}
                 >
                   <td>{visit.meeting_date}</td>
