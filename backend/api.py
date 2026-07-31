@@ -538,8 +538,14 @@ def ensure_database_schema():
         role TEXT NOT NULL,
         team TEXT,
         sales_target REAL DEFAULT 0,
-        target_duration TEXT DEFAULT 'monthly'
+        target_duration TEXT DEFAULT 'monthly',
+        target_applicable BOOLEAN DEFAULT TRUE
     )
+    """)
+
+    cur.execute("""
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS target_applicable BOOLEAN DEFAULT TRUE
     """)
 
     cur.execute("""
@@ -1676,6 +1682,7 @@ class UserRegisterRequest(BaseModel):
     password: str
     team: str
     role: str = "user"
+    target_applicable: bool = True
 
 class UserLoginRequest(BaseModel):
     username: str
@@ -1708,8 +1715,8 @@ def register_user(payload: UserRegisterRequest):
 
         cur.execute(
             """
-            INSERT INTO users (username, password, role, team, sales_target, target_duration)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO users (username, password, role, team, sales_target, target_duration, target_applicable)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 username,
@@ -1718,6 +1725,7 @@ def register_user(payload: UserRegisterRequest):
                 team,
                 getattr(payload, "sales_target", 0),
                 getattr(payload, "target_duration", "monthly"),
+                payload.target_applicable,
             ),
         )
 
@@ -1803,8 +1811,8 @@ def admin_create_user(payload: UserRegisterRequest, user: dict = Depends(require
     cur = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO users (username, password, role, team) VALUES (%s, %s, %s, %s)",
-            (username, hash_password(password), role, team),
+            "INSERT INTO users (username, password, role, team, target_applicable) VALUES (%s, %s, %s, %s, %s)",
+            (username, hash_password(password), role, team, payload.target_applicable),
         )
         conn.commit()
         return {"status": "success", "message": "User created successfully"}
@@ -1932,7 +1940,7 @@ def admin_list_users(user: dict = Depends(require_admin)):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, username, role, team, sales_target, target_duration FROM users ORDER BY id DESC")
+        cur.execute("SELECT id, username, role, team, sales_target, target_duration, COALESCE(target_applicable, TRUE) FROM users ORDER BY id DESC")
         rows = cur.fetchall()
         return {
             "users": [
@@ -1943,6 +1951,7 @@ def admin_list_users(user: dict = Depends(require_admin)):
                     "team": row[3] or "",
                     "sales_target": row[4] or 0,
                     "target_duration": row[5] or "monthly",
+                    "target_applicable": row[6],
                 }
                 for row in rows
             ]
@@ -1995,6 +2004,7 @@ class NameRequest(BaseModel):
 class UserTargetUpdateRequest(BaseModel):
     sales_target: float = 0
     target_duration: str = "monthly"
+    target_applicable: bool = True
 
 class MonthlyTargetRequest(BaseModel):
     username: str
@@ -3404,6 +3414,7 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
                     MIN(TRIM(username)) AS username
                 FROM users
                 WHERE TRIM(team) = %s
+                    AND COALESCE(target_applicable, TRUE) = TRUE
                 GROUP BY LOWER(TRIM(username))
             ),
             target_agg AS (
@@ -3494,10 +3505,10 @@ def admin_update_user_target(user_id: int, payload: UserTargetUpdateRequest, use
         cur.execute(
             """
             UPDATE users
-            SET sales_target = %s, target_duration = %s
+            SET sales_target = %s, target_duration = %s, target_applicable = %s
             WHERE id = %s
             """,
-            (payload.sales_target, payload.target_duration, user_id),
+            (payload.sales_target, payload.target_duration, payload.target_applicable, user_id),
         )
         conn.commit()
         return {"status": "success", "message": "Target updated successfully"}

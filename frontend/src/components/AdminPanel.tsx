@@ -10,6 +10,7 @@ type UserItem = {
   sales_target: number;
   target_duration: string;
   target_type?: string;
+  target_applicable?: boolean;
 };
 
 export default function AdminPanel() {
@@ -21,6 +22,7 @@ export default function AdminPanel() {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [salesTarget, setSalesTarget] = useState("");
   const [targetDuration, setTargetDuration] = useState("monthly");
+  const [targetApplicable, setTargetApplicable] = useState(true);
   const [targetYear, setTargetYear] = useState(new Date().getFullYear());
   const [targetMonth, setTargetMonth] = useState("Jan");
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -152,6 +154,7 @@ export default function AdminPanel() {
         role: userRole,
         sales_target: Number(salesTarget || 0),
         target_duration: targetDuration,
+        target_applicable: targetApplicable,
       }),
     });
 
@@ -169,6 +172,7 @@ export default function AdminPanel() {
     setUserRole("user");
     setSalesTarget("");
     setTargetDuration("monthly");
+    setTargetApplicable(true);
     loadUsers();
   };
 
@@ -211,6 +215,23 @@ export default function AdminPanel() {
 
       if (!res.ok) {
         alert(result.detail || "Target update failed");
+        return;
+      }
+
+      const userRes = await fetch(`${API_BASE_URL}/admin/update-user-target/${u.id}`, {
+        method: "PUT",
+        headers: authHeaders,
+        body: JSON.stringify({
+          sales_target: u.sales_target || 0,
+          target_duration: u.target_duration || "monthly",
+          target_applicable: u.target_applicable ?? true,
+        }),
+      });
+
+      const userResult = await userRes.json();
+
+      if (!userRes.ok) {
+        alert(userResult.detail || "User target setting update failed");
         return;
       }
 
@@ -451,6 +472,23 @@ export default function AdminPanel() {
           <option value="6months">6 Months</option>
           <option value="yearly">Yearly</option>
         </select>
+
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            color: "#fff",
+            padding: "0 10px",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={targetApplicable}
+            onChange={(e) => setTargetApplicable(e.target.checked)}
+          />
+          Target Applicable
+        </label>
       </div>
 
       <br />
@@ -812,6 +850,7 @@ export default function AdminPanel() {
               <th>ID</th>
               <th>Username</th>
               <th>Role</th>
+              <th>Target Applicable</th>
               <th>Monthly Target</th>
               <th>Duration</th>
               <th>Actions</th>
@@ -824,6 +863,21 @@ export default function AdminPanel() {
                 <td>{u.id}</td>
                 <td>{u.username}</td>
                 <td>{u.role}</td>
+                
+                <td>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={u.target_applicable ?? true}
+                      onChange={(e) =>
+                        setUsers(users.map((x) =>
+                          x.id === u.id ? { ...x, target_applicable: e.target.checked } : x
+                        ))
+                      }
+                    />
+                    {u.target_applicable ?? true ? "Yes" : "No"}
+                  </label>
+                </td>
 
                 <td>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
