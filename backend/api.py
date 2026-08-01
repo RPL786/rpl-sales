@@ -17,7 +17,7 @@ from psycopg2.extras import execute_values
 
 import pandas as pd
 from sales_auditor import get_boss_audit
-from fastapi import FastAPI, File, HTTPException, UploadFile, Header, Depends
+from fastapi import FastAPI, File, HTTPException, UploadFile, Header, Depends, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pathlib import Path
@@ -2103,11 +2103,17 @@ def admin_delete_user(user_id: int, user: dict = Depends(require_admin)):
         conn.close()
 
 @app.put("/admin/deactivate-user/{user_id}")
-def admin_deactivate_user(user_id: int, payload: UserDeactivateRequest, user: dict = Depends(require_admin)):
+def admin_deactivate_user(
+    user_id: int,
+    payload: dict = Body(default={}),
+    user: dict = Depends(require_admin),
+):
     if user.get("user_id") == user_id:
         raise HTTPException(status_code=400, detail="Admin apna account deactivate nahi kar sakta")
 
-    inactive_date = (payload.inactive_date or "").strip() or datetime.now().strftime("%Y-%m-%d")
+    inactive_date = str(payload.get("inactive_date") or "").strip()
+    if not inactive_date:
+        inactive_date = datetime.now().strftime("%Y-%m-%d")
 
     conn = get_db_connection()
     cur = conn.cursor()
