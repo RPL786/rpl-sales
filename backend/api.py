@@ -2145,7 +2145,7 @@ def admin_reactivate_user(user_id: int, user: dict = Depends(require_admin)):
 
     try:
         cur.execute("""
-            SELECT username, COALESCE(team, '')
+            SELECT username, COALESCE(team, ''), role
             FROM users
             WHERE id = %s
         """, (user_id,))
@@ -2157,9 +2157,37 @@ def admin_reactivate_user(user_id: int, user: dict = Depends(require_admin)):
 
         username = row[0]
         team = row[1]
+        role = row[2]
+
+        # Admin / Super User ko team ki zaroorat nahi
+        if role in {"admin", "super_user"}:
+            cur.execute("""
+                UPDATE users
+                SET is_active = TRUE,
+                    inactive_date = NULL,
+                    target_applicable = FALSE
+                WHERE id = %s
+            """, (user_id,))
+
+            conn.commit()
+            return {"status": "success", "message": "User reactivated successfully"}
+
+        # Normal user / team leader ke liye team required hai
+        if not team:
+            cur.execute("""
+                SELECT team
+                FROM user_team_history
+                WHERE user_id = %s
+                  AND COALESCE(team, '') <> ''
+                ORDER BY id DESC
+                LIMIT 1
+            """, (user_id,))
+
+            history_row = cur.fetchone()
+            team = history_row[0] if history_row else ""
 
         if not team:
-            raise HTTPException(status_code=400, detail="User has no team. Shift team first.")
+            raise HTTPException(status_code=400, detail="User has no old team. Please shift team first.")
 
         today = datetime.now().strftime("%Y-%m-%d")
 
@@ -2167,17 +2195,22 @@ def admin_reactivate_user(user_id: int, user: dict = Depends(require_admin)):
             UPDATE users
             SET is_active = TRUE,
                 inactive_date = NULL,
-                target_applicable = TRUE
+                target_applicable = TRUE,
+                team = %s
             WHERE id = %s
-        """, (user_id,))
+        """, (team, user_id))
 
         cur.execute("""
             UPDATE user_team_history
             SET end_date = NULL
-            WHERE user_id = %s
-              AND team = %s
-            ORDER BY id DESC
-            LIMIT 1
+            WHERE id = (
+                SELECT id
+                FROM user_team_history
+                WHERE user_id = %s
+                  AND team = %s
+                ORDER BY id DESC
+                LIMIT 1
+            )
         """, (user_id, team))
 
         cur.execute("""
