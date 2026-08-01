@@ -205,6 +205,25 @@ export default function AdminPanel() {
     loadUsers();
   };
 
+  const reactivateUser = async (userId: number) => {
+    if (!window.confirm("Reactivate this user?")) return;
+
+    const res = await fetch(`${API_BASE_URL}/admin/reactivate-user/${userId}`, {
+      method: "PUT",
+      headers: authHeaders,
+    });
+
+    const result = await res.json();
+
+    if (!res.ok) {
+      setMessage(result.detail || "User reactivate failed");
+      return;
+    }
+
+    setMessage("User reactivated successfully ✅");
+    loadUsers();
+  };
+
   const shiftUserTeam = async (u: UserItem) => {
     const newTeam = window.prompt("New team name enter karein", u.team || "");
     if (!newTeam) return;
@@ -986,9 +1005,15 @@ export default function AdminPanel() {
                     Reset Password
                   </button>
 
-                  <button className="action-btn" onClick={() => deactivateUser(u.id)}>
-                    Deactivate
-                  </button>
+                  {u.is_active ?? true ? (
+                    <button className="action-btn" onClick={() => deactivateUser(u.id)}>
+                      Deactivate
+                    </button>
+                  ) : (
+                    <button className="action-btn" onClick={() => reactivateUser(u.id)}>
+                      Reactivate
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

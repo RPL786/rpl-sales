@@ -2138,6 +2138,66 @@ def admin_deactivate_user(
     finally:
         conn.close()
 
+@app.put("/admin/reactivate-user/{user_id}")
+def admin_reactivate_user(user_id: int, user: dict = Depends(require_admin)):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT username, COALESCE(team, '')
+            FROM users
+            WHERE id = %s
+        """, (user_id,))
+
+        row = cur.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        username = row[0]
+        team = row[1]
+
+        if not team:
+            raise HTTPException(status_code=400, detail="User has no team. Shift team first.")
+
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        cur.execute("""
+            UPDATE users
+            SET is_active = TRUE,
+                inactive_date = NULL,
+                target_applicable = TRUE
+            WHERE id = %s
+        """, (user_id,))
+
+        cur.execute("""
+            UPDATE user_team_history
+            SET end_date = NULL
+            WHERE user_id = %s
+              AND team = %s
+            ORDER BY id DESC
+            LIMIT 1
+        """, (user_id, team))
+
+        cur.execute("""
+            INSERT INTO user_team_history (user_id, username, team, start_date, end_date)
+            SELECT %s, %s, %s, %s, NULL
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM user_team_history
+                WHERE user_id = %s
+                  AND end_date IS NULL
+            )
+        """, (user_id, username, team, today, user_id))
+
+        conn.commit()
+        return {"status": "success", "message": "User reactivated successfully"}
+
+    finally:
+        cur.close()
+        conn.close()
+
 @app.put("/admin/shift-user-team/{user_id}")
 def admin_shift_user_team(user_id: int, payload: UserTeamShiftRequest, user: dict = Depends(require_admin)):
     new_team = payload.new_team.strip()
