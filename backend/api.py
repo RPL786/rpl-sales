@@ -7,7 +7,7 @@ import re
 import urllib.error
 import urllib.request
 import psycopg2
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 import sys
 import socket
@@ -205,6 +205,37 @@ def year_from_date(date_str: str):
     return dt.year
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+def last_day_of_month(year: int, month_num: int) -> str:
+    if month_num == 12:
+        next_month = datetime(year + 1, 1, 1)
+    else:
+        next_month = datetime(year, month_num + 1, 1)
+
+    last_day = next_month - timedelta(days=1)
+    return last_day.strftime("%Y-%m-%d")
+
+
+def get_period_range(year: int, month: str = "") -> tuple[str, str]:
+    month = (month or "").strip()[:3].title()
+
+    if month:
+        month_num = MONTH_TO_NUM.get(month)
+        if not month_num:
+            raise HTTPException(status_code=400, detail="Invalid month")
+        return (
+            f"{int(year):04d}-{month_num:02d}-01",
+            last_day_of_month(int(year), month_num),
+        )
+
+    return (f"{int(year):04d}-01-01", f"{int(year):04d}-12-31")
+
+
+def previous_date(date_str: str) -> str:
+    dt = datetime.fromisoformat(date_str)
+    return (dt - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
 
 def get_available_months_for_df(df: pd.DataFrame) -> List[str]:
     monthly = df[MONTHS].sum()
@@ -539,13 +570,53 @@ def ensure_database_schema():
         team TEXT,
         sales_target REAL DEFAULT 0,
         target_duration TEXT DEFAULT 'monthly',
-        target_applicable BOOLEAN DEFAULT TRUE
+        target_applicable BOOLEAN DEFAULT TRUE,
+        is_active BOOLEAN DEFAULT TRUE,
+        inactive_date TEXT
     )
     """)
 
     cur.execute("""
     ALTER TABLE users
     ADD COLUMN IF NOT EXISTS target_applicable BOOLEAN DEFAULT TRUE
+    """)
+
+    cur.execute("""
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE
+    """)
+
+    cur.execute("""
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS inactive_date TEXT
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS user_team_history (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER,
+        username TEXT NOT NULL,
+        team TEXT NOT NULL,
+        start_date TEXT NOT NULL,
+        end_date TEXT
+    )
+    """)
+
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_user_team_history_team_dates
+    ON user_team_history (team, start_date, end_date)
+    """)
+
+    cur.execute("""
+    INSERT INTO user_team_history (user_id, username, team, start_date, end_date)
+    SELECT id, username, COALESCE(team, ''), '1900-01-01', inactive_date
+    FROM users u
+    WHERE COALESCE(team, '') <> ''
+        AND NOT EXISTS (
+            SELECT 1
+            FROM user_team_history h
+            WHERE LOWER(TRIM(h.username)) = LOWER(TRIM(u.username))
+        )
     """)
 
     cur.execute("""
@@ -1744,11 +1815,18 @@ def login_user(payload: UserLoginRequest):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, username, password, role, team FROM users WHERE username = %s", (username,))
+        cur.execute("""
+            SELECT id, username, password, role, team, COALESCE(is_active, TRUE)
+            FROM users
+            WHERE username = %s
+        """, (username,))
         user = cur.fetchone()
 
         if not user or not verify_password(password, user[2]):
             raise HTTPException(status_code=401, detail="Invalid username or password")
+
+        if not user[5]:
+            raise HTTPException(status_code=403, detail="User account is inactive")
 
         token = create_access_token({
             "user_id": user[0],
@@ -1811,10 +1889,29 @@ def admin_create_user(payload: UserRegisterRequest, user: dict = Depends(require
     cur = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO users (username, password, role, team, target_applicable) VALUES (%s, %s, %s, %s, %s)",
+            """
+            INSERT INTO users (username, password, role, team, target_applicable, is_active, inactive_date)
+            VALUES (%s, %s, %s, %s, %s, TRUE, NULL)
+            RETURNING id
+            """,
             (username, hash_password(password), role, team, payload.target_applicable),
         )
+
+        new_user_id = cur.fetchone()[0]
+
+        if team:
+            cur.execute("""
+                INSERT INTO user_team_history (user_id, username, team, start_date, end_date)
+                VALUES (%s, %s, %s, %s, NULL)
+            """, (
+                new_user_id,
+                username,
+                team,
+                datetime.now().strftime("%Y-%m-%d"),
+            ))
+
         conn.commit()
+
         return {"status": "success", "message": "User created successfully"}
     except Exception:
         raise HTTPException(status_code=400, detail="Username already exists")
@@ -1940,7 +2037,20 @@ def admin_list_users(user: dict = Depends(require_admin)):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, username, role, team, sales_target, target_duration, COALESCE(target_applicable, TRUE) FROM users ORDER BY id DESC")
+        cur.execute("""
+            SELECT
+                id,
+                username,
+                role,
+                team,
+                sales_target,
+                target_duration,
+                COALESCE(target_applicable, TRUE),
+                COALESCE(is_active, TRUE),
+                inactive_date
+            FROM users
+            ORDER BY id DESC
+        """)
         rows = cur.fetchall()
         return {
             "users": [
@@ -1952,6 +2062,8 @@ def admin_list_users(user: dict = Depends(require_admin)):
                     "sales_target": row[4] or 0,
                     "target_duration": row[5] or "monthly",
                     "target_applicable": row[6],
+                    "is_active": row[7],
+                    "inactive_date": row[8] or "",
                 }
                 for row in rows
             ]
@@ -1963,14 +2075,114 @@ def admin_list_users(user: dict = Depends(require_admin)):
 @app.delete("/admin/delete-user/{user_id}")
 def admin_delete_user(user_id: int, user: dict = Depends(require_admin)):
     if user.get("user_id") == user_id:
-        raise HTTPException(status_code=400, detail="Admin apna account delete nahi kar sakta")
+        raise HTTPException(status_code=400, detail="Admin apna account deactivate nahi kar sakta")
+
+    inactive_date = datetime.now().strftime("%Y-%m-%d")
 
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+        cur.execute("""
+            UPDATE users
+            SET is_active = FALSE,
+                inactive_date = %s,
+                target_applicable = FALSE
+            WHERE id = %s
+        """, (inactive_date, user_id))
+
+        cur.execute("""
+            UPDATE user_team_history
+            SET end_date = %s
+            WHERE user_id = %s
+              AND end_date IS NULL
+        """, (inactive_date, user_id))
+
         conn.commit()
-        return {"status": "success", "message": "User deleted successfully"}
+        return {"status": "success", "message": "User deactivated successfully"}
+    finally:
+        conn.close()
+
+@app.put("/admin/deactivate-user/{user_id}")
+def admin_deactivate_user(user_id: int, payload: UserDeactivateRequest, user: dict = Depends(require_admin)):
+    if user.get("user_id") == user_id:
+        raise HTTPException(status_code=400, detail="Admin apna account deactivate nahi kar sakta")
+
+    inactive_date = (payload.inactive_date or "").strip() or datetime.now().strftime("%Y-%m-%d")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE users
+            SET is_active = FALSE,
+                inactive_date = %s,
+                target_applicable = FALSE
+            WHERE id = %s
+        """, (inactive_date, user_id))
+
+        cur.execute("""
+            UPDATE user_team_history
+            SET end_date = %s
+            WHERE user_id = %s
+              AND end_date IS NULL
+        """, (inactive_date, user_id))
+
+        conn.commit()
+        return {"status": "success", "message": "User deactivated successfully"}
+    finally:
+        conn.close()
+
+@app.put("/admin/shift-user-team/{user_id}")
+def admin_shift_user_team(user_id: int, payload: UserTeamShiftRequest, user: dict = Depends(require_admin)):
+    new_team = payload.new_team.strip()
+    effective_date = payload.effective_date.strip()
+
+    if not new_team or not effective_date:
+        raise HTTPException(status_code=400, detail="New team and effective date required")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT username, COALESCE(team, '') FROM users WHERE id = %s", (user_id,))
+        row = cur.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        username = row[0]
+        old_team = row[1]
+
+        if old_team == new_team:
+            raise HTTPException(status_code=400, detail="User is already in this team")
+
+        old_end_date = previous_date(effective_date)
+
+        cur.execute("""
+            UPDATE user_team_history
+            SET end_date = %s
+            WHERE user_id = %s
+              AND end_date IS NULL
+        """, (old_end_date, user_id))
+
+        cur.execute("""
+            INSERT INTO user_team_history (user_id, username, team, start_date, end_date)
+            VALUES (%s, %s, %s, %s, NULL)
+        """, (user_id, username, new_team, effective_date))
+
+        cur.execute("""
+            UPDATE users
+            SET team = %s,
+                is_active = TRUE,
+                inactive_date = NULL
+            WHERE id = %s
+        """, (new_team, user_id))
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "message": f"User shifted from {old_team} to {new_team} effective {effective_date}"
+        }
     finally:
         conn.close()
 
@@ -2005,6 +2217,14 @@ class UserTargetUpdateRequest(BaseModel):
     sales_target: float = 0
     target_duration: str = "monthly"
     target_applicable: bool = True
+
+class UserTeamShiftRequest(BaseModel):
+    new_team: str
+    effective_date: str
+
+
+class UserDeactivateRequest(BaseModel):
+    inactive_date: str = ""
 
 class MonthlyTargetRequest(BaseModel):
     username: str
@@ -3395,6 +3615,8 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
     if not year:
         year = datetime.now().year
 
+    period_start, period_end = get_period_range(year, month)
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -3403,19 +3625,21 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
         team_row = cur.fetchone()
         team_target_type = (team_row[0] if team_row else "QTY").upper()
 
-        achieved_field = "se.amount" if team_target_type == "AMOUNT" else "se.quantity"
-
         achieved_field = "amount" if team_target_type == "AMOUNT" else "quantity"
 
         cur.execute(f"""
             WITH team_users AS (
                 SELECT
-                    LOWER(TRIM(username)) AS username_key,
-                    MIN(TRIM(username)) AS username
-                FROM users
-                WHERE TRIM(team) = %s
-                    AND COALESCE(target_applicable, TRUE) = TRUE
-                GROUP BY LOWER(TRIM(username))
+                    LOWER(TRIM(h.username)) AS username_key,
+                    MIN(TRIM(h.username)) AS username
+                FROM user_team_history h
+                LEFT JOIN users u
+                    ON LOWER(TRIM(u.username)) = LOWER(TRIM(h.username))
+                WHERE TRIM(h.team) = %s
+                  AND h.start_date <= %s
+                  AND COALESCE(h.end_date, '9999-12-31') >= %s
+                  AND COALESCE(u.target_applicable, TRUE) = TRUE
+                GROUP BY LOWER(TRIM(h.username))
             ),
             target_agg AS (
                 SELECT
@@ -3456,6 +3680,8 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
             ORDER BY u.username
         """, (
             team,
+            period_end,
+            period_start,
             team_target_type,
             team_target_type,
             team,
@@ -3497,6 +3723,7 @@ def get_forecast(team: str = "", month: str = "", year: int = 0):
     finally:
         cur.close()
         conn.close()
+        
 @app.put("/admin/update-user-target/{user_id}")
 def admin_update_user_target(user_id: int, payload: UserTargetUpdateRequest, user: dict = Depends(require_admin)):
     conn = get_db_connection()

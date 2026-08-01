@@ -11,6 +11,8 @@ type UserItem = {
   target_duration: string;
   target_type?: string;
   target_applicable?: boolean;
+  is_active?: boolean;
+  inactive_date?: string;
 };
 
 export default function AdminPanel() {
@@ -176,22 +178,65 @@ export default function AdminPanel() {
     loadUsers();
   };
 
-  const deleteUser = async (userId: number) => {
-    if (!window.confirm("Delete this user?")) return;
+  const deactivateUser = async (userId: number) => {
+    const inactiveDate = window.prompt(
+      "Inactive date enter karein YYYY-MM-DD format me",
+      new Date().toISOString().slice(0, 10)
+    );
 
-    const res = await fetch(`${API_BASE_URL}/admin/delete-user/${userId}`, {
-      method: "DELETE",
+    if (!inactiveDate) return;
+
+    if (!window.confirm(`Deactivate this user from ${inactiveDate}?`)) return;
+
+    const res = await fetch(`${API_BASE_URL}/admin/deactivate-user/${userId}`, {
+      method: "PUT",
       headers: authHeaders,
+      body: JSON.stringify({ inactive_date: inactiveDate }),
     });
 
     const result = await res.json();
 
     if (!res.ok) {
-      setMessage(result.detail || "User delete failed");
+      setMessage(result.detail || "User deactivate failed");
       return;
     }
 
-    setMessage("User deleted successfully ✅");
+    setMessage("User deactivated successfully ✅");
+    loadUsers();
+  };
+
+  const shiftUserTeam = async (u: UserItem) => {
+    const newTeam = window.prompt("New team name enter karein", u.team || "");
+    if (!newTeam) return;
+
+    const effectiveDate = window.prompt(
+      "Effective date enter karein YYYY-MM-DD format me",
+      new Date().toISOString().slice(0, 10)
+    );
+
+    if (!effectiveDate) return;
+
+    if (!window.confirm(`${u.username} ko ${newTeam} team me ${effectiveDate} se shift karna hai?`)) {
+      return;
+    }
+
+    const res = await fetch(`${API_BASE_URL}/admin/shift-user-team/${u.id}`, {
+      method: "PUT",
+      headers: authHeaders,
+      body: JSON.stringify({
+        new_team: newTeam,
+        effective_date: effectiveDate,
+      }),
+    });
+
+    const result = await res.json();
+
+    if (!res.ok) {
+      setMessage(result.detail || "Team shift failed");
+      return;
+    }
+
+    setMessage("User team shifted successfully ✅");
     loadUsers();
   };
 
@@ -850,6 +895,8 @@ export default function AdminPanel() {
               <th>ID</th>
               <th>Username</th>
               <th>Role</th>
+              <th>Team</th>
+              <th>Status</th>
               <th>Target Applicable</th>
               <th>Monthly Target</th>
               <th>Duration</th>
@@ -863,6 +910,17 @@ export default function AdminPanel() {
                 <td>{u.id}</td>
                 <td>{u.username}</td>
                 <td>{u.role}</td>
+                <td>{u.team || "-"}</td>
+
+                <td>
+                  {u.is_active ?? true ? (
+                    <span style={{ color: "#22c55e", fontWeight: 700 }}>Active</span>
+                  ) : (
+                    <span style={{ color: "#ef4444", fontWeight: 700 }}>
+                      Inactive {u.inactive_date ? `(${u.inactive_date})` : ""}
+                    </span>
+                  )}
+                </td>
                 
                 <td>
                   <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -919,13 +977,17 @@ export default function AdminPanel() {
                   <button className="action-btn" onClick={() => saveUserTarget(u)}>
                     Save Target
                   </button>
-                  
+
+                  <button className="action-btn" onClick={() => shiftUserTeam(u)}>
+                    Shift Team
+                  </button>
+
                   <button className="action-btn" onClick={() => resetPassword(u.id)}>
                     Reset Password
                   </button>
 
-                  <button className="action-btn" onClick={() => deleteUser(u.id)}>
-                    Delete
+                  <button className="action-btn" onClick={() => deactivateUser(u.id)}>
+                    Deactivate
                   </button>
                 </td>
               </tr>
