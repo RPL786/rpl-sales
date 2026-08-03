@@ -2232,9 +2232,13 @@ def admin_reactivate_user(user_id: int, user: dict = Depends(require_admin)):
         conn.close()
 
 @app.put("/admin/shift-user-team/{user_id}")
-def admin_shift_user_team(user_id: int, payload: UserTeamShiftRequest, user: dict = Depends(require_admin)):
-    new_team = payload.new_team.strip()
-    effective_date = payload.effective_date.strip()
+def admin_shift_user_team(
+    user_id: int,
+    payload: dict = Body(default={}),
+    user: dict = Depends(require_admin),
+):
+    new_team = str(payload.get("new_team") or "").strip()
+    effective_date = str(payload.get("effective_date") or "").strip()
 
     if not new_team or not effective_date:
         raise HTTPException(status_code=400, detail="New team and effective date required")
@@ -2242,7 +2246,7 @@ def admin_shift_user_team(user_id: int, payload: UserTeamShiftRequest, user: dic
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT username, COALESCE(team, '') FROM users WHERE id = %s", (user_id,))
+        cur.execute("SELECT username, COALESCE(team, ''), role FROM users WHERE id = %s", (user_id,))
         row = cur.fetchone()
 
         if not row:
@@ -2250,9 +2254,7 @@ def admin_shift_user_team(user_id: int, payload: UserTeamShiftRequest, user: dic
 
         username = row[0]
         old_team = row[1]
-
-        if old_team == new_team:
-            raise HTTPException(status_code=400, detail="User is already in this team")
+        role = row[2]
 
         old_end_date = previous_date(effective_date)
 
@@ -2272,17 +2274,22 @@ def admin_shift_user_team(user_id: int, payload: UserTeamShiftRequest, user: dic
             UPDATE users
             SET team = %s,
                 is_active = TRUE,
-                inactive_date = NULL
+                inactive_date = NULL,
+                target_applicable = CASE
+                    WHEN %s IN ('admin', 'super_user') THEN FALSE
+                    ELSE COALESCE(target_applicable, TRUE)
+                END
             WHERE id = %s
-        """, (new_team, user_id))
+        """, (new_team, role, user_id))
 
         conn.commit()
 
         return {
             "status": "success",
-            "message": f"User shifted from {old_team} to {new_team} effective {effective_date}"
+            "message": f"User shifted from {old_team or '-'} to {new_team} effective {effective_date}"
         }
     finally:
+        cur.close()
         conn.close()
 
 
