@@ -5604,7 +5604,21 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
     finally:
         cur.close()
         conn.close()
-        
+
+@app.post("/api/ressi-bot")
+def ressi_bot(payload: BossAgentRequest, user: dict = Depends(get_current_user)):
+    role = user.get("role")
+
+    if role not in {"admin", "super_user"}:
+        raise HTTPException(status_code=403, detail="Boss AI Agent is allowed only for admin and super user")
+
+    expected_key = os.getenv("BOSS_AGENT_KEY", "").strip()
+
+    if not expected_key:
+        raise HTTPException(status_code=500, detail="BOSS_AGENT_KEY is not configured")
+
+    return boss_agent(payload, x_boss_agent_key=expected_key)
+
 @app.get("/admin/download-backup")
 def download_backup(user: dict = Depends(require_admin)):
 

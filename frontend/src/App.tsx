@@ -49,6 +49,7 @@ import DataEntry from "./DataEntry";
 import AdminPanel from "./components/AdminPanel";
 import "./sales_ai_insights.css";
 import ForecastTab from "./components/ForecastTab";
+import RessiBot from "./components/RessiBot";
 
 type ClientStatus = "new" | "lost" | "retained";
 type Severity = "high" | "medium" | "low";
@@ -2915,6 +2916,8 @@ const productSelectionLabel =
           </div>
         </div>
       </div>
+
+        {(isAdmin || isSuperUser) && <RessiBot apiBaseUrl={API_BASE_URL} />}
 
         <div className="footer">
           © {new Date().getFullYear()} Created by Adil Siddiqui — Ressichem Pvt Ltd
