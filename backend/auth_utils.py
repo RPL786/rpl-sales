@@ -16,7 +16,7 @@ if SECRET_KEY == "mysecretkey123" or len(SECRET_KEY) < 32:
     raise RuntimeError("JWT_SECRET_KEY is weak. Please use a long random value in backend/.env")
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "720"))
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
