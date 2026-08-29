@@ -4300,6 +4300,25 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             and not wants_target
         )
 
+        wants_product_share = wants_product and any(
+            token in q_lower for token in [
+                "share",
+                "percent",
+                "percentage",
+                "%",
+                "ratio",
+                "hissa",
+                "kitna percent",
+                "kitna persen",
+                "persont",
+                "product share",
+                "sale share",
+                "sales share",
+                "total sale ka kitna",
+                "total sale ka kitna percent",
+            ]
+        )
+
         wants_client = any(w in q_lower for w in ["client", "clients", "customer", "customers", "party", "parties"]) or bool(client)
         wants_team = "team" in q_lower
 
@@ -4745,7 +4764,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 + (
                     "\n\nMonth-wise details:\n" + "\n".join(month_lines)
                     if month_lines
-                    else "\n\nMonth-wise details: No month-wise comparison data found."
+                    else ""
                 ),
                 f"{month or 'Full Year'} comparison report:\n\n"
                 f"Year-wise summary:\n"
@@ -4754,7 +4773,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 + (
                     "\n\nMonth-wise details:\n" + "\n".join(month_lines)
                     if month_lines
-                    else "\n\nMonth-wise details nahi mili."
+                    else ""
                 )
             )
 
@@ -5445,6 +5464,103 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                     "achievement_percent": round(percent, 2),
                     "remaining": remaining,
                     "salespersons": salespersons[:20],
+                },
+            }
+
+        # -----------------------------
+        # Product share / percentage report
+        # Example: Aug main total sale kitni hui aur konsi product ka share kitna percent hai
+        # -----------------------------
+        if wants_product_share:
+            where, params = sales_filter()
+
+            cur.execute(f"""
+                SELECT
+                    product,
+                    COALESCE(SUM(quantity), 0) AS total_qty,
+                    COALESCE(SUM(amount), 0) AS total_amount,
+                    COUNT(DISTINCT client_name) AS clients_count,
+                    COUNT(DISTINCT sales_person) AS salespersons_count
+                FROM sales_entries
+                WHERE {where}
+                  AND product IS NOT NULL
+                  AND TRIM(product) <> ''
+                GROUP BY product
+                ORDER BY total_qty DESC
+            """, tuple(params))
+
+            rows_raw = cur.fetchall()
+
+            total_qty = sum(float(r[1] or 0) for r in rows_raw)
+            total_amount = sum(float(r[2] or 0) for r in rows_raw)
+
+            def pct(part, total):
+                if not total:
+                    return 0
+                return (float(part or 0) / float(total or 0)) * 100
+
+            def fmt_pct(value):
+                if value == 0:
+                    return "0%"
+                if value < 1:
+                    return f"{value:.4f}%"
+                return f"{value:.2f}%"
+
+            rows = []
+            for r in rows_raw:
+                qty = float(r[1] or 0)
+                amount = float(r[2] or 0)
+
+                rows.append({
+                    "product": r[0],
+                    "total_qty": qty,
+                    "total_amount": amount,
+                    "qty_share_percent": pct(qty, total_qty),
+                    "amount_share_percent": pct(amount, total_amount),
+                    "clients_count": int(r[3] or 0),
+                    "salespersons_count": int(r[4] or 0),
+                })
+
+            top_lines = []
+            for index, item in enumerate(rows, start=1):
+                top_lines.append(
+                    f"{index}. {item['product']} — "
+                    f"Qty {item['total_qty']:,.0f} "
+                    f"({fmt_pct(item['qty_share_percent'])} qty share), "
+                    f"Amount Rs {item['total_amount']:,.0f} "
+                    f"({fmt_pct(item['amount_share_percent'])} amount share)"
+                )
+
+            period_text = f"{month or 'Full Year'} {year or ''}".strip()
+
+            answer = reply(
+                f"Overall {period_text} product share report:\n"
+                f"Total Qty: {total_qty:,.0f}\n"
+                f"Total Amount: Rs {total_amount:,.0f}\n"
+                f"Products Sold: {len(rows)}\n\n"
+                f"Product-wise share of total sale:\n"
+                + ("\n".join(top_lines) if top_lines else "No product share data found."),
+                f"Overall {period_text} product share report:\n"
+                f"Total Qty: {total_qty:,.0f}\n"
+                f"Total Amount: Rs {total_amount:,.0f}\n"
+                f"Products Sold: {len(rows)}\n\n"
+                f"Total sale me product-wise share:\n"
+                + ("\n".join(top_lines) if top_lines else "Product share data nahi mila.")
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "product_share_percentage",
+                    "team": selected_team,
+                    "salesperson": salesperson,
+                    "client": client,
+                    "product": product,
+                    "month": month,
+                    "year": year,
+                    "total_qty": total_qty,
+                    "total_amount": total_amount,
+                    "rows": rows,
                 },
             }
 
