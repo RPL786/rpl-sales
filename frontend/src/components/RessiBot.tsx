@@ -185,7 +185,7 @@ export default function RessiBot({ apiBaseUrl }: Props) {
         >
           <span className="ressi-robot-mini">
             <img
-              src="/ressibot-car.png"
+              src={ressiBotCar}
               alt="RessiBot"
               className="ressi-bot-mini-img"
             />
@@ -203,7 +203,7 @@ export default function RessiBot({ apiBaseUrl }: Props) {
           <div className="ressi-bot-header">
             <div className="ressi-bot-brand">
               <img
-                src="/ressibot-car.png"
+                src={ressiBotCar}
                 alt="RessiBot 3D robot car"
                 className={`ressi-bot-3d-car ${listening ? "listening" : ""}`}
               />
