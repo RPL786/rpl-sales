@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, Mic, Send, Volume2, X } from "lucide-react";
+import { Mic, Send, Volume2, X } from "lucide-react";
 
 type ChatMessage = {
   role: "bot" | "user";
@@ -184,8 +184,13 @@ export default function RessiBot({ apiBaseUrl }: Props) {
           }}
         >
           <span className="ressi-robot-mini">
-            <Bot size={24} />
+            <img
+              src="/ressibot-car.png"
+              alt="RessiBot"
+              className="ressi-bot-mini-img"
+            />
           </span>
+
           <span>
             <strong>RessiBot</strong>
             <small>Boss AI Agent</small>
@@ -197,14 +202,11 @@ export default function RessiBot({ apiBaseUrl }: Props) {
         <div className="ressi-bot-panel">
           <div className="ressi-bot-header">
             <div className="ressi-bot-brand">
-              <div className={`ressi-robot-head ${listening ? "listening" : ""}`}>
-                <div className="robot-antenna" />
-                <div className="robot-eyes">
-                  <span />
-                  <span />
-                </div>
-                <div className="robot-mouth" />
-              </div>
+              <img
+                src="/ressibot-car.png"
+                alt="RessiBot 3D robot car"
+                className={`ressi-bot-3d-car ${listening ? "listening" : ""}`}
+              />
 
               <div>
                 <strong>RessiBot</strong>

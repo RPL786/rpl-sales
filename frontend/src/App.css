@@ -2017,3 +2017,72 @@ button {
     bottom: 14px;
   }
 }
+
+.ressi-bot-3d-car {
+  width: 132px;
+  height: auto;
+  object-fit: contain;
+  flex: 0 0 auto;
+  border-radius: 18px;
+  filter: drop-shadow(0 16px 24px rgba(0, 0, 0, 0.38));
+  animation: ressiCarFloat 2.4s ease-in-out infinite;
+}
+
+.ressi-bot-3d-car.listening {
+  animation: ressiCarListening 0.75s ease-in-out infinite;
+  filter:
+    drop-shadow(0 16px 24px rgba(0, 0, 0, 0.38))
+    drop-shadow(0 0 22px rgba(34, 211, 238, 0.9));
+}
+
+.ressi-bot-mini-img {
+  width: 56px;
+  height: 42px;
+  object-fit: cover;
+  object-position: left center;
+  border-radius: 14px;
+  display: block;
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.35));
+}
+
+.ressi-robot-mini {
+  width: 58px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.16);
+  overflow: hidden;
+  animation: ressiCarFloat 2.4s ease-in-out infinite;
+}
+
+@keyframes ressiCarFloat {
+  0%, 100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes ressiCarListening {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    transform: translateY(-6px) scale(1.05);
+  }
+}
+
+@media (max-width: 720px) {
+  .ressi-bot-3d-car {
+    width: 105px;
+  }
+
+  .ressi-bot-mini-img {
+    width: 52px;
+    height: 40px;
+  }
+}
