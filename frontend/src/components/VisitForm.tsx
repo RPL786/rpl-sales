@@ -63,6 +63,8 @@ const emptyRow: VisitRow = {
   notes: "",
 };
 
+const VISIT_DRAFT_KEY = "ressichem_visit_form_draft_v1";
+
 function todayDate() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -88,10 +90,32 @@ export default function VisitForm() {
   const canViewAllTeams = authUser?.role === "admin" || authUser?.role === "super_user";
   const canSelectTeamAndSalesPerson = authUser?.role === "admin" || authUser?.role === "super_user";
 
-  const [team, setTeam] = useState(canSelectTeamAndSalesPerson ? "" : authUser?.team || "");
-  const [salesPerson, setSalesPerson] = useState(canSelectTeamAndSalesPerson ? "" : authUser?.username || "");
-  const [meetingDate, setMeetingDate] = useState(todayDate());
-  const [rows, setRows] = useState<VisitRow[]>(Array.from({ length: 5 }, () => ({ ...emptyRow })));
+  const savedDraft = useMemo(() => {
+    try {
+      const raw = localStorage.getItem(VISIT_DRAFT_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const [team, setTeam] = useState(
+    savedDraft?.team ?? (canSelectTeamAndSalesPerson ? "" : authUser?.team || "")
+  );
+
+  const [salesPerson, setSalesPerson] = useState(
+    savedDraft?.salesPerson ?? (canSelectTeamAndSalesPerson ? "" : authUser?.username || "")
+  );
+
+  const [meetingDate, setMeetingDate] = useState(savedDraft?.meetingDate ?? todayDate());
+
+  const [rows, setRows] = useState<VisitRow[]>(() => {
+    if (Array.isArray(savedDraft?.rows) && savedDraft.rows.length > 0) {
+      return savedDraft.rows;
+    }
+
+    return Array.from({ length: 5 }, () => ({ ...emptyRow }));
+  });
   const [openProductRow, setOpenProductRow] = useState<number | null>(null);
   const [clientSearch, setClientSearch] = useState<{ [key: number]: string }>({});
   const [productSearch, setProductSearch] = useState<{ [key: number]: string }>({});
@@ -110,6 +134,23 @@ export default function VisitForm() {
   const [newClientName, setNewClientName] = useState("");
   const [salesPersons, setSalesPersons] = useState<any[]>([]);
 
+  useEffect(() => {
+    if (editingVisitId) return;
+
+    try {
+      localStorage.setItem(
+        VISIT_DRAFT_KEY,
+        JSON.stringify({
+          team,
+          salesPerson,
+          meetingDate,
+          rows,
+          savedAt: new Date().toISOString(),
+        })
+      );
+    } catch {}
+  }, [team, salesPerson, meetingDate, rows, editingVisitId]);
+  
   const loadVisits = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/visit-entries`, {
@@ -228,8 +269,12 @@ export default function VisitForm() {
     );
   };
 
-  const clearRows = () => {
+  const clearRows = (clearDraft = false) => {
     setRows(Array.from({ length: 5 }, () => ({ ...emptyRow })));
+
+    if (clearDraft) {
+      localStorage.removeItem(VISIT_DRAFT_KEY);
+    }
   };
 
   const addEmptyRow = () => {
@@ -307,6 +352,7 @@ export default function VisitForm() {
         }
 
         setMessage("Visit updated successfully.");
+        localStorage.removeItem(VISIT_DRAFT_KEY);
         setEditingVisitId(null);
         clearRows();
         setMeetingDate(todayDate());
@@ -327,6 +373,7 @@ export default function VisitForm() {
       }
 
       setMessage(`${result.saved || completedRows.length} visits saved successfully.`);
+      localStorage.removeItem(VISIT_DRAFT_KEY);
       clearRows();
       loadVisits();
     } catch {
@@ -868,7 +915,7 @@ export default function VisitForm() {
           <button className="action-btn" type="button" onClick={addEmptyRow}>
             Add Empty Row
           </button>
-          <button className="action-btn" type="button" onClick={clearRows}>
+          <button className="action-btn" type="button" onClick={() => clearRows(true)}>
             Clear All
           </button>
         </div>
