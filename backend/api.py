@@ -4517,6 +4517,95 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             }
 
         # -----------------------------
+        # Product-wise comparison should go before normal comparison
+        # -----------------------------
+        if wants_comparison and wants_product:
+            comp_where, comp_params = sales_filter(use_compare_years=True)
+
+            cur.execute(f"""
+                SELECT
+                    year,
+                    month,
+                    product,
+                    COALESCE(SUM(quantity), 0) AS total_qty,
+                    COALESCE(SUM(amount), 0) AS total_amount,
+                    COUNT(DISTINCT client_name) AS clients_count,
+                    COUNT(DISTINCT sales_person) AS salespersons_count
+                FROM sales_entries
+                WHERE {comp_where}
+                GROUP BY year, month, product
+                ORDER BY
+                    year,
+                    CASE month
+                        WHEN 'Jan' THEN 1
+                        WHEN 'Feb' THEN 2
+                        WHEN 'Mar' THEN 3
+                        WHEN 'Apr' THEN 4
+                        WHEN 'May' THEN 5
+                        WHEN 'Jun' THEN 6
+                        WHEN 'Jul' THEN 7
+                        WHEN 'Aug' THEN 8
+                        WHEN 'Sep' THEN 9
+                        WHEN 'Oct' THEN 10
+                        WHEN 'Nov' THEN 11
+                        WHEN 'Dec' THEN 12
+                        ELSE 99
+                    END,
+                    product
+            """, tuple(comp_params))
+
+            rows = [
+                {
+                    "year": int(r[0]),
+                    "month": r[1],
+                    "product": r[2],
+                    "total_qty": float(r[3] or 0),
+                    "total_amount": float(r[4] or 0),
+                    "clients_count": int(r[5] or 0),
+                    "salespersons_count": int(r[6] or 0),
+                }
+                for r in cur.fetchall()
+            ]
+
+            lines = []
+            current_group = ""
+
+            for item in rows:
+                group = f"{item['month']} {item['year']}"
+
+                if group != current_group:
+                    current_group = group
+                    lines.append(f"\n{group}:")
+
+                lines.append(
+                    f"- {item['product']}: Qty {item['total_qty']:,.0f}, "
+                    f"Amount Rs {item['total_amount']:,.0f}, "
+                    f"Clients {item['clients_count']}, "
+                    f"Salespersons {item['salespersons_count']}"
+                )
+
+            answer = reply(
+                f"Product-wise comparison report for {month or 'Full Year'}:\n\n"
+                + ("\n".join(lines) if lines else "No product-wise comparison data found."),
+                f"{month or 'Full Year'} ka product-wise comparison report:\n\n"
+                + ("\n".join(lines) if lines else "Product-wise comparison data nahi mila.")
+            )
+
+            return {
+                "answer": answer,
+                "data": {
+                    "type": "product_wise_comparison",
+                    "team": selected_team,
+                    "salesperson": salesperson,
+                    "product": product,
+                    "client": client,
+                    "month": month or "Full Year",
+                    "years": compare_years,
+                    "rows": rows,
+                },
+            }
+
+        # -----------------------------
         # 2) Comparison answer
         # -----------------------------
         if wants_comparison:
