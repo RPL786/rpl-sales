@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 const API_BASE_URL = "";
+const PRODUCT_CATEGORIES = ["Tile Adhesive", "Tile Grout", "BCM", "Zepoxy"];
 
 type UserItem = {
   id: number;
@@ -32,6 +33,7 @@ export default function AdminPanel() {
   const [teamName, setTeamName] = useState("");
   const [teamTargetType, setTeamTargetType] = useState("QTY");
   const [productName, setProductName] = useState("");
+  const [productCategory, setProductCategory] = useState("Tile Adhesive");
   const [teams, setTeams] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [productDropdownOpen, setProductDropdownOpen] = useState(false);
@@ -346,13 +348,14 @@ export default function AdminPanel() {
     const res = await fetch(`${API_BASE_URL}/api/products`, {
       method: "POST",
       headers: authHeaders,
-      body: JSON.stringify({ name: productName }),
+      body: JSON.stringify({ name: productName, category: productCategory }),
     });
 
     const result = await res.json();
     setMessage(res.ok ? "Product added ✅" : result.detail || "Product add failed");
     if (res.ok) {
       setProductName("");
+      setProductCategory("Tile Adhesive");
       loadTeamsProducts();
     }
   };
@@ -391,6 +394,27 @@ export default function AdminPanel() {
     loadTeamsProducts();
   };
 
+  const updateProductCategory = async (product: any, category: string) => {
+    const res = await fetch(`${API_BASE_URL}/api/products/${product.id}`, {
+      method: "PUT",
+      headers: authHeaders,
+      body: JSON.stringify({
+        name: product.name,
+        category,
+      }),
+    });
+
+    const result = await res.json();
+
+    if (!res.ok) {
+      setMessage(result.detail || "Product category update failed");
+      return;
+    }
+
+    setMessage("Product category updated ✅");
+    loadTeamsProducts();
+  };
+  
   const deleteProduct = async (id: number) => {
     if (!window.confirm("Delete this product?")) return;
 
@@ -681,6 +705,18 @@ export default function AdminPanel() {
           />
         </label>
 
+        <select
+          className="filter-select"
+          value={productCategory}
+          onChange={(e) => setProductCategory(e.target.value)}
+        >
+          {PRODUCT_CATEGORIES.map((cat) => (
+            <option key={cat} value={cat}>
+              {cat}
+            </option>
+          ))}
+        </select>
+        
         <input
           className="filter-select"
           placeholder="New product name"
@@ -774,7 +810,23 @@ export default function AdminPanel() {
                   marginBottom: 8,
                 }}
               >
-                <span>{product.name}</span>
+                <div style={{ display: "grid", gap: 6, flex: 1 }}>
+                  <strong>{product.name}</strong>
+
+                  <select
+                    className="filter-select"
+                    value={product.category || ""}
+                    onChange={(e) => updateProductCategory(product, e.target.value)}
+                    style={{ maxWidth: 240 }}
+                  >
+                    <option value="">Uncategorized</option>
+                    {PRODUCT_CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
                 <button
                   className="action-btn"

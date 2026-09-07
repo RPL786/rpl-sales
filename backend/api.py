@@ -562,6 +562,11 @@ def ensure_database_schema():
     """)
 
     cur.execute("""
+    ALTER TABLE products
+    ADD COLUMN IF NOT EXISTS category TEXT DEFAULT ''
+    """)
+
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
@@ -2318,6 +2323,7 @@ def admin_reset_password(user_id: int, payload: AdminResetPasswordRequest, user:
 class NameRequest(BaseModel):
     name: str
     target_type: str = "QTY"
+    category: str = ""
 
 class UserTargetUpdateRequest(BaseModel):
     sales_target: float = 0
@@ -2429,30 +2435,56 @@ def upload_products(file: UploadFile = File(...), user: dict = Depends(require_a
     import pandas as pd
 
     df = pd.read_excel(file.file)
-    df.columns = [c.strip().lower() for c in df.columns]
+    df.columns = [str(c).strip().lower() for c in df.columns]
 
     if "name" not in df.columns:
         raise HTTPException(status_code=400, detail="Excel must have 'name' column")
 
-    names = df["name"].dropna().astype(str).str.strip().unique()
+    if "category" not in df.columns:
+        df["category"] = ""
+
+    rows = (
+        df[["name", "category"]]
+        .dropna(subset=["name"])
+        .astype(str)
+        .apply(lambda col: col.str.strip())
+        .drop_duplicates(subset=["name"])
+        .to_dict("records")
+    )
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     added = 0
 
-    for name in names:
-        cur.execute(
-            "INSERT INTO products (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
-            (name,)
-        )
-        if cur.rowcount > 0:
+    try:
+        for item in rows:
+            name = item.get("name", "").strip()
+            category = item.get("category", "").strip()
+
+            if not name:
+                continue
+
+            cur.execute(
+                """
+                INSERT INTO products (name, category)
+                VALUES (%s, %s)
+                ON CONFLICT (name)
+                DO UPDATE SET
+                    category = CASE
+                        WHEN EXCLUDED.category <> '' THEN EXCLUDED.category
+                        ELSE products.category
+                    END
+                """,
+                (name, category),
+            )
+
             added += 1
 
-    conn.commit()
-    conn.close()
-
-    return {"status": "ok", "added": added}
+        conn.commit()
+        return {"status": "ok", "added": added}
+    finally:
+        conn.close()
 
 @app.get("/api/clients")
 def list_clients(user: dict = Depends(get_current_user)):
@@ -2486,30 +2518,81 @@ def list_products(user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, name FROM products ORDER BY name")
+        cur.execute("""
+            SELECT id, name, COALESCE(category, '')
+            FROM products
+            ORDER BY name
+        """)
         rows = cur.fetchall()
-        return {"products": [{"id": r[0], "name": r[1]} for r in rows]}
+
+        return {
+            "products": [
+                {
+                    "id": r[0],
+                    "name": r[1],
+                    "category": r[2],
+                }
+                for r in rows
+            ]
+        }
     finally:
         conn.close()
-
 
 @app.post("/api/products")
 def add_product(payload: NameRequest, user: dict = Depends(require_admin)):
     name = payload.name.strip()
+    category = (payload.category or "").strip()
+
     if not name:
         raise HTTPException(status_code=400, detail="Product name required")
 
     conn = get_db_connection()
     cur = conn.cursor()
+
     try:
-        cur.execute("INSERT INTO products (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (name,))
+        cur.execute(
+            """
+            INSERT INTO products (name, category)
+            VALUES (%s, %s)
+            ON CONFLICT (name)
+            DO UPDATE SET category = EXCLUDED.category
+            """,
+            (name, category),
+        )
         conn.commit()
         return {"status": "ok", "message": "Product added"}
-    except Exception:
-        raise HTTPException(status_code=400, detail="Product already exists")
     finally:
         conn.close()
 
+@app.put("/api/products/{product_id}")
+def update_product(product_id: int, payload: NameRequest, user: dict = Depends(require_admin)):
+    name = payload.name.strip()
+    category = (payload.category or "").strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Product name required")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            UPDATE products
+            SET name = %s,
+                category = %s
+            WHERE id = %s
+            """,
+            (name, category, product_id),
+        )
+
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Product not found")
+
+        conn.commit()
+        return {"status": "ok", "message": "Product updated"}
+    finally:
+        conn.close()
 
 @app.delete("/api/products/{product_id}")
 def delete_product(product_id: int, user: dict = Depends(require_admin)):
@@ -2519,6 +2602,168 @@ def delete_product(product_id: int, user: dict = Depends(require_admin)):
         cur.execute("DELETE FROM products WHERE id = %s", (product_id,))
         conn.commit()
         return {"status": "ok", "message": "Product deleted"}
+    finally:
+        conn.close()
+
+@app.get("/api/product-contribution-report")
+def product_contribution_report(
+    year: Optional[int] = None,
+    month: str = "",
+    team: str = "",
+    category: str = "",
+    product: str = "",
+    user: dict = Depends(get_current_user),
+):
+    report_year = int(year or datetime.now().year)
+    clean_month = (month or "").strip()
+    clean_team = (team or "").strip()
+    clean_category = (category or "").strip()
+    clean_product = (product or "").strip()
+
+    where = ["s.year = %s"]
+    params: list[Any] = [report_year]
+
+    if clean_month and clean_month.lower() != "all":
+        where.append("s.month = %s")
+        params.append(clean_month[:3].title())
+
+    if clean_team and clean_team.lower() != "all":
+        where.append("s.team = %s")
+        params.append(clean_team)
+
+    if clean_category and clean_category.lower() != "all":
+        where.append("COALESCE(NULLIF(TRIM(p.category), ''), 'Uncategorized') = %s")
+        params.append(clean_category)
+
+    if clean_product and clean_product.lower() != "all":
+        where.append("s.product = %s")
+        params.append(clean_product)
+
+    where_sql = " AND ".join(where)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            f"""
+            SELECT
+                COALESCE(NULLIF(TRIM(p.category), ''), 'Uncategorized') AS category,
+                s.product,
+                COALESCE(SUM(s.quantity), 0) AS total_qty,
+                COALESCE(SUM(s.amount), 0) AS total_amount
+            FROM sales_entries s
+            LEFT JOIN products p
+                ON LOWER(TRIM(p.name)) = LOWER(TRIM(s.product))
+            WHERE {where_sql}
+              AND COALESCE(TRIM(s.product), '') <> ''
+            GROUP BY 1, 2
+            ORDER BY 1, total_qty DESC
+            """,
+            tuple(params),
+        )
+
+        product_rows_raw = cur.fetchall()
+
+        cur.execute(
+            f"""
+            SELECT
+                COALESCE(NULLIF(TRIM(p.category), ''), 'Uncategorized') AS category,
+                s.product,
+                s.team,
+                COALESCE(SUM(s.quantity), 0) AS team_qty,
+                COALESCE(SUM(s.amount), 0) AS team_amount
+            FROM sales_entries s
+            LEFT JOIN products p
+                ON LOWER(TRIM(p.name)) = LOWER(TRIM(s.product))
+            WHERE {where_sql}
+              AND COALESCE(TRIM(s.product), '') <> ''
+              AND COALESCE(TRIM(s.team), '') <> ''
+            GROUP BY 1, 2, 3
+            ORDER BY 1, 2, team_qty DESC
+            """,
+            tuple(params),
+        )
+
+        team_rows_raw = cur.fetchall()
+
+        overall_qty = sum(float(r[2] or 0) for r in product_rows_raw)
+        overall_amount = sum(float(r[3] or 0) for r in product_rows_raw)
+
+        team_names = sorted({str(r[2]) for r in team_rows_raw if r[2]})
+
+        team_map: dict[tuple[str, str], list[dict[str, Any]]] = {}
+
+        for category_name, product_name, team_name, team_qty, team_amount in team_rows_raw:
+            key = (str(category_name), str(product_name))
+            team_map.setdefault(key, []).append({
+                "team": team_name,
+                "qty": float(team_qty or 0),
+                "amount": float(team_amount or 0),
+            })
+
+        rows = []
+
+        for category_name, product_name, total_qty, total_amount in product_rows_raw:
+            category_name = str(category_name)
+            product_name = str(product_name)
+            total_qty = float(total_qty or 0)
+            total_amount = float(total_amount or 0)
+
+            key = (category_name, product_name)
+
+            teams_payload = []
+            for item in team_map.get(key, []):
+                qty = float(item["qty"] or 0)
+                amount = float(item["amount"] or 0)
+
+                teams_payload.append({
+                    "team": item["team"],
+                    "qty": qty,
+                    "amount": amount,
+                    "qty_percent": round((qty / total_qty * 100) if total_qty else 0, 2),
+                    "amount_percent": round((amount / total_amount * 100) if total_amount else 0, 2),
+                })
+
+            rows.append({
+                "category": category_name,
+                "product": product_name,
+                "total_qty": total_qty,
+                "total_amount": total_amount,
+                "overall_qty_percent": round((total_qty / overall_qty * 100) if overall_qty else 0, 2),
+                "overall_amount_percent": round((total_amount / overall_amount * 100) if overall_amount else 0, 2),
+                "teams": teams_payload,
+            })
+
+        categories_map: dict[str, list[dict[str, Any]]] = {}
+
+        for row in rows:
+            categories_map.setdefault(row["category"], []).append(row)
+
+        categories_payload = [
+            {
+                "category": category_name,
+                "products": products,
+                "total_qty": sum(float(p["total_qty"] or 0) for p in products),
+                "total_amount": sum(float(p["total_amount"] or 0) for p in products),
+            }
+            for category_name, products in categories_map.items()
+        ]
+
+        return {
+            "year": report_year,
+            "month": clean_month or "all",
+            "filters": {
+                "team": clean_team,
+                "category": clean_category,
+                "product": clean_product,
+            },
+            "overall_total_qty": overall_qty,
+            "overall_total_amount": overall_amount,
+            "team_names": team_names,
+            "rows": rows,
+            "categories": categories_payload,
+        }
     finally:
         conn.close()
 

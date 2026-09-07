@@ -50,12 +50,13 @@ import AdminPanel from "./components/AdminPanel";
 import "./sales_ai_insights.css";
 import ForecastTab from "./components/ForecastTab";
 import RessiBot from "./components/RessiBot";
+import ProductContributionTab from "./components/ProductContributionTab";
 
 type ClientStatus = "new" | "lost" | "retained";
 type Severity = "high" | "medium" | "low";
 type RecoveryPriority = "high" | "medium" | "low";
 type InsightTone = "positive" | "warning" | "negative" | "neutral";
-type TabKey = "overview" | "clients" | "products" | "team" | "recovery" | "executive" | "visit" | "dataEntry" | "admin" | "forecast";
+type TabKey = "overview" | "clients" | "products" | "team" | "recovery" | "executive" | "visit" | "dataEntry" | "admin" | "forecast" | "productContribution";
 
 type Summary = {
   current_year?: number;
@@ -536,6 +537,7 @@ if (!authUser) {
     { key: "visit", label: "Visit Form", icon: <Briefcase size={16} /> },
     { key: "dataEntry", label: "Data Entry", icon: <Package size={16} /> },
     { key: "forecast", label: "Forecast", icon: <TrendingUp size={16} /> },
+    { key: "productContribution", label: "Product Contribution", icon: <BarChart3 size={16} /> },
   ];
 
   useEffect(() => {
@@ -2912,6 +2914,7 @@ const productSelectionLabel =
             {activeTab === "visit" && <VisitForm />}
             {activeTab === "dataEntry" && <DataEntry />}
             {activeTab === "forecast" && <ForecastTab />}
+            {activeTab === "productContribution" && <ProductContributionTab />}
             {activeTab === "admin" && isAdmin && <AdminPanel />}            
           </div>
         </div>
