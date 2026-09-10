@@ -404,7 +404,7 @@ function App() {
   const canViewAllTeams = isAdmin || isSuperUser;
 
   
-  const [loginForm, setLoginForm] = useState({ username: "admin", password: "admin" });
+  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [loginError, setLoginError] = useState("");
 
   const handleLogin = async () => {
