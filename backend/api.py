@@ -4244,7 +4244,6 @@ def find_best_product(question: str, products: list[str]) -> str:
     return ""
 
 
-
 # External console reads this endpoint to keep its salesperson list in sync.
 @app.get("/api/salespersons")
 def get_salespersons(x_boss_agent_key: str = Header(default="")):
@@ -4267,43 +4266,64 @@ def get_salespersons(x_boss_agent_key: str = Header(default="")):
 
     try:
         cur.execute("""
-            WITH last_sales AS (
+            WITH activity AS (
                 SELECT
                     LOWER(TRIM(sales_person)) AS name_key,
-                    MAX(LEFT(TRIM(entry_date), 10)) AS last_sale
+                    sales_person AS report_name,
+                    CASE
+                        WHEN LEFT(TRIM(COALESCE(entry_date, '')), 10)
+                             ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                        THEN LEFT(TRIM(entry_date), 10)
+                        ELSE NULL
+                    END AS activity_date
                 FROM sales_entries
-                WHERE LEFT(TRIM(COALESCE(entry_date, '')), 10)
-                      ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-                GROUP BY LOWER(TRIM(sales_person))
-            ),
-            last_visits AS (
+                WHERE TRIM(COALESCE(sales_person, '')) <> ''
+
+                UNION ALL
+
                 SELECT
                     LOWER(TRIM(sales_person)) AS name_key,
-                    MAX(LEFT(TRIM(meeting_date), 10)) AS last_visit
+                    sales_person AS report_name,
+                    CASE
+                        WHEN LEFT(TRIM(COALESCE(meeting_date, '')), 10)
+                             ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                        THEN LEFT(TRIM(meeting_date), 10)
+                        ELSE NULL
+                    END AS activity_date
                 FROM visit_entries
-                WHERE LEFT(TRIM(COALESCE(meeting_date, '')), 10)
-                      ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-                GROUP BY LOWER(TRIM(sales_person))
+                WHERE TRIM(COALESCE(sales_person, '')) <> ''
+            ),
+            activity_summary AS (
+                SELECT
+                    name_key,
+                    (
+                        ARRAY_AGG(
+                            report_name
+                            ORDER BY activity_date DESC NULLS LAST,
+                                     report_name
+                        )
+                    )[1] AS report_name,
+                    MAX(activity_date) AS last_activity
+                FROM activity
+                GROUP BY name_key
             )
             SELECT
                 u.id,
-                u.username,
+                COALESCE(a.report_name, u.username) AS name,
+                u.role,
                 (
                     COALESCE(u.is_active, TRUE)
-                    AND NULLIF(TRIM(COALESCE(u.inactive_date, '')), '')
-                        IS NULL
+                    AND NULLIF(
+                        TRIM(COALESCE(u.inactive_date, '')),
+                        ''
+                    ) IS NULL
                 ) AS active,
-                GREATEST(
-                    s.last_sale,
-                    v.last_visit
-                ) AS last_activity
+                a.last_activity
             FROM users u
-            LEFT JOIN last_sales s
-                ON s.name_key = LOWER(TRIM(u.username))
-            LEFT JOIN last_visits v
-                ON v.name_key = LOWER(TRIM(u.username))
+            LEFT JOIN activity_summary a
+                ON a.name_key = LOWER(TRIM(u.username))
             WHERE u.role IN ('user', 'team_leader')
-            ORDER BY LOWER(u.username), u.id
+            ORDER BY LOWER(COALESCE(a.report_name, u.username))
         """)
 
         rows = cur.fetchall()
@@ -4312,8 +4332,9 @@ def get_salespersons(x_boss_agent_key: str = Header(default="")):
             {
                 "name": row[1],
                 "code": str(row[0]) if row[0] is not None else None,
-                "active": bool(row[2]),
-                "last_activity": row[3]
+                "active": bool(row[3]),
+                "last_activity": row[4],
+                "role": row[2]
             }
             for row in rows
         ]
@@ -4326,7 +4347,6 @@ def get_salespersons(x_boss_agent_key: str = Header(default="")):
     finally:
         cur.close()
         conn.close()
-
 
 @app.post("/api/boss-agent")
 def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default="")):
