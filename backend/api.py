@@ -4244,6 +4244,90 @@ def find_best_product(question: str, products: list[str]) -> str:
     return ""
 
 
+
+# External console reads this endpoint to keep its salesperson list in sync.
+@app.get("/api/salespersons")
+def get_salespersons(x_boss_agent_key: str = Header(default="")):
+    expected_key = os.getenv("BOSS_AGENT_KEY", "").strip()
+
+    if not expected_key:
+        raise HTTPException(
+            status_code=500,
+            detail="BOSS_AGENT_KEY is not configured"
+        )
+
+    if x_boss_agent_key != expected_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid boss agent key"
+        )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            WITH last_sales AS (
+                SELECT
+                    LOWER(TRIM(sales_person)) AS name_key,
+                    MAX(LEFT(TRIM(entry_date), 10)) AS last_sale
+                FROM sales_entries
+                WHERE LEFT(TRIM(COALESCE(entry_date, '')), 10)
+                      ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                GROUP BY LOWER(TRIM(sales_person))
+            ),
+            last_visits AS (
+                SELECT
+                    LOWER(TRIM(sales_person)) AS name_key,
+                    MAX(LEFT(TRIM(meeting_date), 10)) AS last_visit
+                FROM visit_entries
+                WHERE LEFT(TRIM(COALESCE(meeting_date, '')), 10)
+                      ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                GROUP BY LOWER(TRIM(sales_person))
+            )
+            SELECT
+                u.id,
+                u.username,
+                (
+                    COALESCE(u.is_active, TRUE)
+                    AND NULLIF(TRIM(COALESCE(u.inactive_date, '')), '')
+                        IS NULL
+                ) AS active,
+                GREATEST(
+                    s.last_sale,
+                    v.last_visit
+                ) AS last_activity
+            FROM users u
+            LEFT JOIN last_sales s
+                ON s.name_key = LOWER(TRIM(u.username))
+            LEFT JOIN last_visits v
+                ON v.name_key = LOWER(TRIM(u.username))
+            WHERE u.role IN ('user', 'team_leader')
+            ORDER BY LOWER(u.username), u.id
+        """)
+
+        rows = cur.fetchall()
+
+        salespersons = [
+            {
+                "name": row[1],
+                "code": str(row[0]) if row[0] is not None else None,
+                "active": bool(row[2]),
+                "last_activity": row[3]
+            }
+            for row in rows
+        ]
+
+        return {
+            "salespersons": salespersons,
+            "count": len(salespersons)
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.post("/api/boss-agent")
 def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default="")):
     expected_key = os.getenv("BOSS_AGENT_KEY", "").strip()
