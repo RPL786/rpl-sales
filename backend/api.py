@@ -2782,7 +2782,7 @@ def health():
 
 
 @app.post("/upload")
-async def upload(file: UploadFile = File(...)):
+async def upload(file: UploadFile = File(...), user: dict = Depends(require_admin)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected")
     if not file.filename.lower().endswith((".xlsx", ".xls")):
@@ -2813,7 +2813,7 @@ async def upload(file: UploadFile = File(...)):
 
 
 @app.get("/dashboard")
-def dashboard():
+def dashboard(user: dict = Depends(get_current_user)):
     headers = {
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache",
@@ -3034,7 +3034,7 @@ def dashboard_from_db(team: str = "", user: dict = Depends(get_current_user)):
     return payload
 
 @app.get("/form/options")
-def get_form_options(team: str = ""):
+def get_form_options(team: str = "", user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -3100,7 +3100,7 @@ def get_form_options(team: str = ""):
 
 
 @app.post("/form/team")
-def add_team(payload: dict):
+def add_form_team(payload: dict, user: dict = Depends(require_admin)):
     name = str(payload.get("name", "")).strip()
     if not name:
         raise HTTPException(status_code=400, detail="Team name is required")
@@ -3114,7 +3114,7 @@ def add_team(payload: dict):
 
 
 @app.put("/form/team/rename")
-def rename_team(payload: dict):
+def rename_team(payload: dict, user: dict = Depends(require_admin)):
     old_name = str(payload.get("old_name", "")).strip()
     new_name = str(payload.get("new_name", "")).strip()
 
@@ -3255,7 +3255,7 @@ def delete_data_entry(entry_id: int, user: dict = Depends(require_admin)):
     return {"status": "success"}
 
 @app.post("/data/upload")
-def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "append"):
+def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "append", user: dict = Depends(require_admin)):
     print("UPLOAD ROUTE HIT", team, file.filename if file else "NO_FILE", flush=True)
     print("STEP 1: route started")
     try:
@@ -3578,7 +3578,7 @@ def clear_database(user: dict = Depends(get_current_user)):
         conn.close()
 
 @app.post("/reset")
-def reset_dashboard():
+def reset_dashboard(user: dict = Depends(require_admin)):
     global DASHBOARD_CACHE
 
     DASHBOARD_CACHE = None
@@ -3634,7 +3634,7 @@ def reset_dashboard():
 
 
 @app.post("/salesperson-insights")
-def salesperson_insights(payload: SalespersonInsightsRequest):
+def salesperson_insights(payload: SalespersonInsightsRequest, user: dict = Depends(get_current_user)):
     if payload.data_source == "database":
         dashboard_payload = get_database_dashboard_payload(payload.team or "")
     else:
@@ -3955,7 +3955,7 @@ def update_visit_entry(visit_id: int, payload: VisitEntryRequest, user: dict = D
         conn.close()
 
 @app.get("/forecast")
-def get_forecast(team: str = "", month: str = "", year: int = 0):
+def get_forecast(team: str = "", month: str = "", year: int = 0, user: dict = Depends(get_current_user)):
     team = team.strip()
     month = month.strip()[:3].title()
 
