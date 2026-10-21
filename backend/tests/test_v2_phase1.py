@@ -282,3 +282,61 @@ def test_v1_admin_flows_still_work(client, admin, org):
     assert client.get("/api/visit-entries", headers=admin).status_code == 200
     assert client.get("/form/options?team=BCM", headers=admin).json()["sales_people"] == ["AHMED"]
     assert client.get("/forecast?team=BCM", headers=admin).status_code == 200
+
+
+# ------------------------------------------------------------ review fixes
+def test_form_options_and_dashboard_teams_are_scoped(client, org):
+    h = login(client, "khi_coord", "pass1234")
+    assert set(client.get("/form/options", headers=h).json()["teams"]) == {"BCM", "Tile Adhesive"}
+    assert client.get("/forecast?team=Lahore Team", headers=h).status_code == 403
+
+
+def test_dashboard_admin_team_name_is_canonical(client, admin, org):
+    h = login(client, "dash_admin", "pass1234")
+    r = client.post("/data/entry", json={"team": "bcm", "sales_person": "AHMED", "client_name": "C",
+                                         "product": "P", "entry_date": "2026-02-01", "quantity": 1}, headers=h)
+    assert r.status_code == 200 and r.json()["saved"]["team"] == "BCM"
+    names = [t["name"] for t in client.get("/api/teams", headers=admin).json()["teams"]]
+    assert "bcm" not in names
+    v = client.post("/api/visit-entry", headers=h, json={
+        "team": "BCM", "sales_person": "AHMED", "client_name": "C", "client_category": "", "product": "P",
+        "meeting_date": "2026-10-21", "meeting_time": "10:00", "meeting_type": "Visit", "meeting_status": "Done",
+        "client_response": "", "order_amount": 0, "quantity": 0, "future_potential": 0,
+        "next_meeting_date": "", "next_meeting_time": "", "notes": ""})
+    assert v.status_code == 200, v.text
+    v2 = client.post("/api/visit-entry", headers=h, json={
+        "team": "Tile Adhesive", "sales_person": "ALI", "client_name": "C", "client_category": "", "product": "P",
+        "meeting_date": "2026-10-21", "meeting_time": "10:00", "meeting_type": "Visit", "meeting_status": "Done",
+        "client_response": "", "order_amount": 0, "quantity": 0, "future_potential": 0,
+        "next_meeting_date": "", "next_meeting_time": "", "notes": ""})
+    assert v2.status_code == 403
+
+
+def test_boss_cannot_clear_database(client, org):
+    boss = login(client, "boss", "pass1234")
+    assert client.post("/admin/clear-database", headers=boss).status_code == 403
+
+
+def test_role_change_and_deactivation_apply_immediately(client, admin, org):
+    uid = org["users"]["dash_admin"]
+    h = login(client, "dash_admin", "pass1234")
+    assert client.put(f"/api/v2/users/{uid}/role", json={"role": "city_coordinator"}, headers=admin).status_code == 200
+    r = client.post("/data/upload?team=BCM&mode=append", headers=h, files={"file": ("x.xlsx", io.BytesIO(b"x"))})
+    assert r.status_code == 403  # same old token, new role already applied
+    assert client.put(f"/api/v2/users/{uid}/role", json={"role": "dashboard_admin"}, headers=admin).status_code == 200
+    assert client.put(f"/admin/deactivate-user/{uid}", json={"inactive_date": "2026-10-21"},
+                      headers=admin).status_code == 200
+    assert client.get("/data/entries", headers=h).status_code == 401
+    assert client.put(f"/admin/reactivate-user/{uid}", headers=admin).status_code == 200
+
+
+def test_deleting_team_removes_its_scopes(client, admin, org):
+    tid = client.post("/api/teams", json={"name": "Temp Team"}, headers=admin)
+    teams = {t["name"]: t["id"] for t in client.get("/api/teams", headers=admin).json()["teams"]}
+    uid = org["users"]["khi_coord"]
+    client.put(f"/api/v2/users/{uid}/scopes", json={"scopes": [
+        {"scope_type": "city", "scope_id": org["khi"]}, {"scope_type": "team", "scope_id": teams["Temp Team"]}]},
+        headers=admin)
+    assert client.delete(f"/api/teams/{teams['Temp Team']}", headers=admin).status_code == 200
+    scopes = next(u for u in client.get("/api/v2/users", headers=admin).json()["users"] if u["id"] == uid)["scopes"]
+    assert scopes == [{"scope_type": "city", "scope_id": org["khi"]}]

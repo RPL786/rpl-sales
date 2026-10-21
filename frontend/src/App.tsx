@@ -2648,6 +2648,22 @@ const productSelectionLabel =
                 </>
               )}
 
+              {userRole === "dashboard_admin" && (
+                <button
+                  className="action-btn"
+                  onClick={() => {
+                    if (!selectedTeam) {
+                      alert("Please first select team");
+                      return;
+                    }
+                    document.getElementById("db-upload-input")?.click();
+                  }}
+                  disabled={uploading}
+                >
+                  <Upload size={16} />
+                  {uploading ? "Uploading DB..." : "Upload DB Excel"}
+                </button>
+              )}
               <span className="v2-role-chip" title="Your role">
                 <Shield size={13} /> {ROLE_LABELS[userRole] || userRole}
               </span>

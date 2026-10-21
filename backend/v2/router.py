@@ -402,6 +402,13 @@ def set_user_role(user_id: int, payload: RoleIn, access: Access = Depends(requir
             if cur.fetchone()[0] <= 1:
                 raise HTTPException(status_code=400, detail="At least one active Super Admin is required")
         cur.execute("UPDATE users SET role = %s WHERE id = %s", (role, user_id))
+        if role in TEAMLESS_ROLES and old_role not in TEAMLESS_ROLES:
+            # No longer a field seller: close open team membership, stop target tracking
+            cur.execute(
+                "UPDATE user_team_history SET end_date = %s WHERE user_id = %s AND end_date IS NULL",
+                (date.today().isoformat(), user_id),
+            )
+            cur.execute("UPDATE users SET target_applicable = FALSE WHERE id = %s", (user_id,))
         audit.record(cur, access, "user.role_change", "user", user_id,
                      {"username": username, "from": old_role, "to": role})
     return {"status": "ok", "note": "User must log in again for the new role to apply"}

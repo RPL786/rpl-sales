@@ -36,7 +36,7 @@ export default function DataEntry() {
     authUser?.role === "admin" || authUser?.role === "super_user";
 
   const canSelectTeamAndSalesPerson =
-    authUser?.role === "admin" || authUser?.role === "super_user";
+    authUser?.role === "admin" || authUser?.role === "super_user" || authUser?.role === "dashboard_admin";
 
   const [form, setForm] = useState({
     team: "",

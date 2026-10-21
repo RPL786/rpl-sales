@@ -86,14 +86,60 @@ def norm(value: object) -> str:
 
 
 # Token -----------------------------------------------------------------------
+def refresh_user(payload: dict) -> dict:
+    """Reload role / team / is_active from the database.
+
+    Tokens live for hours; without this a demoted or deactivated user would keep
+    their old rights until the token expired.
+    """
+    uid = payload.get("user_id")
+    conn = connect()
+    try:
+        cur = conn.cursor()
+        if uid is not None:
+            cur.execute(
+                "SELECT id, username, role, COALESCE(team, ''), COALESCE(is_active, TRUE) FROM users WHERE id = %s",
+                (uid,),
+            )
+        else:
+            cur.execute(
+                "SELECT id, username, role, COALESCE(team, ''), COALESCE(is_active, TRUE) FROM users WHERE username = %s",
+                (payload.get("username") or "",),
+            )
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row or not row[4]:
+        raise HTTPException(status_code=401, detail="Account inactive or not found. Please login again.")
+    fresh = dict(payload)
+    fresh.update({"user_id": row[0], "username": row[1], "role": row[2], "team": row[3]})
+    return fresh
+
+
 def decode_user(authorization: str = Header(default="")) -> dict:
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Login required")
     token = authorization.replace("Bearer ", "", 1).strip()
     try:
-        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return refresh_user(payload)
+
+
+def canonical_team(team: str) -> Optional[str]:
+    """Return the stored team name matching `team` (case/space-insensitive), or None."""
+    team = (team or "").strip()
+    if not team:
+        return None
+    conn = connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM teams WHERE LOWER(TRIM(name)) = LOWER(%s) ORDER BY id LIMIT 1", (team,))
+        row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
 
 
 # Scope -------------------------------------------------------------------

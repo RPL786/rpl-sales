@@ -56,10 +56,13 @@ from v2.schema import ensure_v2_schema
 from v2.permissions import (
     ALL_ROLES as V2_ALL_ROLES,
     TEAMLESS_ROLES as V2_TEAMLESS_ROLES,
+    SYSTEM_ADMIN as V2_SYSTEM_ADMIN,
     UPLOAD_SALES as V2_UPLOAD_SALES,
     VIEW_REPORTS as V2_VIEW_REPORTS,
     VIEW_TEAM_VISITS as V2_VIEW_TEAM_VISITS,
     assert_team_allowed,
+    canonical_team,
+    refresh_user,
     resolve_access,
 )
 from v2 import audit as v2_audit
@@ -1886,9 +1889,10 @@ def get_current_user(authorization: str = Header(default="")):
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    # V2: role/team/active status come from the DB, so changes apply immediately
+    return refresh_user(payload)
 
 def require_admin(user: dict = Depends(get_current_user)):
     if user.get("role") != "admin":
@@ -2197,8 +2201,8 @@ def admin_reactivate_user(user_id: int, user: dict = Depends(require_admin)):
         team = row[1]
         role = row[2]
 
-        # Admin / Super User ko team ki zaroorat nahi
-        if role in {"admin", "super_user"}:
+        # Admin / Super User (aur V2 teamless roles) ko team ki zaroorat nahi
+        if role in V2_TEAMLESS_ROLES:
             cur.execute("""
                 UPDATE users
                 SET is_active = TRUE,
@@ -2314,7 +2318,7 @@ def admin_shift_user_team(
                 is_active = TRUE,
                 inactive_date = NULL,
                 target_applicable = CASE
-                    WHEN %s IN ('admin', 'super_user') THEN FALSE
+                    WHEN %s IN ('admin', 'super_user', 'city_coordinator', 'dashboard_admin') THEN FALSE
                     ELSE COALESCE(target_applicable, TRUE)
                 END
             WHERE id = %s
@@ -2460,7 +2464,9 @@ def delete_team(team_id: int, user: dict = Depends(require_admin)):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        cur.execute("DELETE FROM user_scopes WHERE scope_type = 'team' AND scope_id = %s", (team_id,))
         cur.execute("DELETE FROM teams WHERE id = %s", (team_id,))
+        v2_audit.record(cur, resolve_access(user), "team.delete", "team", team_id, {})
         conn.commit()
         return {"status": "ok", "message": "Team deleted"}
     finally:
@@ -2935,7 +2941,7 @@ def dashboard_from_db(team: str = "", user: dict = Depends(get_current_user)):
     try:
         cur = conn.cursor()
         cur.execute("SELECT name FROM teams ORDER BY name")
-        available_teams = [row[0] for row in cur.fetchall()]
+        available_teams = resolve_access(user).filter_teams([row[0] for row in cur.fetchall()])
     finally:
         conn.close()
 
@@ -3073,7 +3079,7 @@ def get_form_options(team: str = "", user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        teams = fetch_lookup_values(conn, "teams")
+        teams = resolve_access(user).filter_teams(fetch_lookup_values(conn, "teams"))
 
         team = (team or "").strip()
         if not team:
@@ -3183,6 +3189,9 @@ def add_entry(entry: dict, user: dict = Depends(get_current_user)):
         team = str(entry.get("team", "")).strip()
         sales_person = str(entry.get("sales_person", "")).strip()
         assert_team_allowed(resolve_access(user), team)
+        team = canonical_team(team) or ""
+        if not team:
+            raise HTTPException(status_code=400, detail="Team not found. Ask Super Admin to create it first.")
     else:
         team = str(user.get("team", "")).strip()
         sales_person = str(user.get("username", "")).strip()
@@ -3321,6 +3330,11 @@ def upload_to_db(
     if not upload_access.can(V2_UPLOAD_SALES):
         raise HTTPException(status_code=403, detail="You do not have permission to upload sales data")
     assert_team_allowed(upload_access, (team or "").strip())
+    if user.get("role") != "admin":
+        existing_team = canonical_team(team)
+        if not existing_team:
+            raise HTTPException(status_code=400, detail="Team not found. Ask Super Admin to create it first.")
+        team = existing_team
     v2_audit.record_standalone(upload_access, "sales.upload", "team", (team or "").strip(),
                                {"mode": mode, "filename": file.filename if file else None})
     print("UPLOAD ROUTE HIT", team, file.filename if file else "NO_FILE", flush=True)
@@ -3621,14 +3635,16 @@ def upload_to_db(
 @app.post("/admin/clear-database")
 def clear_database(user: dict = Depends(get_current_user)):
 
-    if user.get("role") not in ["admin", "super_user"]:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    if not resolve_access(user).can(V2_SYSTEM_ADMIN):
+        raise HTTPException(status_code=403, detail="Super Admin access required")
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
         v2_audit.record(cur, resolve_access(user), "database.clear", "database", None, {})
+        # team ids are recreated on re-upload; team scopes and branch mapping must be redone
+        cur.execute("DELETE FROM user_scopes WHERE scope_type = 'team'")
         cur.execute("DELETE FROM sales_entries")
         cur.execute("DELETE FROM teams")
         cur.execute("DELETE FROM sales_people")
@@ -3735,13 +3751,28 @@ def salesperson_insights(payload: SalespersonInsightsRequest, user: dict = Depen
         },
     }
 
+def visit_owner(user: dict, team: str, sales_person: str):
+    """Team + salesperson a visit is recorded for. Admin and (in-scope) Dashboard Admin may
+    enter visits on behalf of an employee; everyone else records their own visits (V1 rule)."""
+    role = user.get("role")
+    if role == "admin":
+        return (team or "").strip(), (sales_person or "").strip()
+    if role == "dashboard_admin":
+        assert_team_allowed(resolve_access(user), (team or "").strip())
+        canonical = canonical_team(team)
+        if not canonical:
+            raise HTTPException(status_code=400, detail="Team not found")
+        return canonical, (sales_person or "").strip()
+    return user.get("team", ""), user.get("username", "")
+
+
 @app.post("/api/visit-entry")
 def create_visit_entry(payload: VisitEntryRequest, user: dict = Depends(get_current_user)):
     row = {
         "created_by": user.get("username", ""),
         "created_at": now_iso(),
-        "team": payload.team.strip() if user.get("role") == "admin" else user.get("team", ""),
-        "sales_person": payload.sales_person.strip() if user.get("role") == "admin" else user.get("username", ""),
+        "team": visit_owner(user, payload.team, payload.sales_person)[0],
+        "sales_person": visit_owner(user, payload.team, payload.sales_person)[1],
         "client_name": payload.client_name.strip(),
         "client_category": payload.client_category.strip(),
         "product": payload.product.strip(),
@@ -3797,8 +3828,8 @@ def create_visit_entries_bulk(payload: VisitBulkRequest, user: dict = Depends(ge
         row = {
             "created_by": user.get("username", ""),
             "created_at": now_iso(),
-            "team": item.team.strip() if user.get("role") == "admin" else user.get("team", ""),
-            "sales_person": item.sales_person.strip() if user.get("role") == "admin" else user.get("username", ""),
+            "team": visit_owner(user, item.team, item.sales_person)[0],
+            "sales_person": visit_owner(user, item.team, item.sales_person)[1],
             "client_name": item.client_name.strip(),
             "client_category": item.client_category.strip(),
             "product": item.product.strip(),

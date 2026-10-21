@@ -14,11 +14,12 @@ export function apiBaseUrl(): string {
 }
 
 function isApiRequest(url: string): boolean {
-  const base = apiBaseUrl();
-  if (base && url.startsWith(base)) return true;
-  if (url.startsWith("/")) return !url.startsWith("//");
   try {
-    return new URL(url, window.location.href).origin === window.location.origin;
+    // Compare full origins (not string prefixes) so the token never goes to a look-alike host
+    const target = new URL(url, window.location.href).origin;
+    const base = apiBaseUrl();
+    const apiOrigin = base ? new URL(base, window.location.href).origin : window.location.origin;
+    return target === apiOrigin || target === window.location.origin;
   } catch {
     return false;
   }
