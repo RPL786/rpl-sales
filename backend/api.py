@@ -48,7 +48,26 @@ try:
 except ImportError:
     pass
 
-app = FastAPI(title="Sales Intelligence API", version="5.1.0")
+app = FastAPI(title="Sales Intelligence API", version="6.0.0-v2")
+
+# --- RPL Sales V2 (Phase 1): org hierarchy, scoped roles, preferences, audit ---
+from v2.router import router as v2_router
+from v2.schema import ensure_v2_schema
+from v2.permissions import (
+    ALL_ROLES as V2_ALL_ROLES,
+    TEAMLESS_ROLES as V2_TEAMLESS_ROLES,
+    SYSTEM_ADMIN as V2_SYSTEM_ADMIN,
+    UPLOAD_SALES as V2_UPLOAD_SALES,
+    VIEW_REPORTS as V2_VIEW_REPORTS,
+    VIEW_TEAM_VISITS as V2_VIEW_TEAM_VISITS,
+    assert_team_allowed,
+    canonical_team,
+    refresh_user,
+    resolve_access,
+)
+from v2 import audit as v2_audit
+
+app.include_router(v2_router)
 
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
@@ -242,7 +261,11 @@ def get_available_months_for_df(df: pd.DataFrame) -> List[str]:
     return [month for month in MONTHS if safe_float(monthly.get(month, 0)) > 0]
 
 DASHBOARD_CACHE: Optional[Dict[str, Any]] = None
-AI_SETTINGS = get_ai_settings()
+try:
+    AI_SETTINGS = get_ai_settings()
+except Exception as _ai_exc:  # fresh/staging DB: ai_settings table not created yet
+    print("AI SETTINGS NOT LOADED:", str(_ai_exc).splitlines()[0], flush=True)
+    AI_SETTINGS = None
 
 GEMINI_API_KEY = AI_SETTINGS["api_key"] if AI_SETTINGS else None
 GEMINI_MODEL = AI_SETTINGS["model"] if AI_SETTINGS else "gemini-1.5-flash"
@@ -752,6 +775,8 @@ def ensure_database_schema():
 def startup_create_schema():
     print("RUNNING DB SCHEMA CHECK...")
     ensure_database_schema()
+    print("RUNNING V2 SCHEMA CHECK...")
+    ensure_v2_schema()
     
 
 def load_database_data(team: str):
@@ -1864,14 +1889,26 @@ def get_current_user(authorization: str = Header(default="")):
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    # V2: role/team/active status come from the DB, so changes apply immediately
+    return refresh_user(payload)
 
 def require_admin(user: dict = Depends(get_current_user)):
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     return user
+
+
+def require_org_viewer(user: dict = Depends(get_current_user)):
+    """V2: logged-in user who may view organization-wide reports (Super Admin / Boss or org scope)."""
+    access = resolve_access(user)
+    if not (access.org_wide and access.can(V2_VIEW_REPORTS)):
+        raise HTTPException(status_code=403, detail="Organization-wide access required")
+    return user
+
+
+SCOPED_V2_ROLES = {"city_coordinator", "dashboard_admin"}
 
 @app.post("/admin/create-user")
 def admin_create_user(payload: UserRegisterRequest, user: dict = Depends(require_admin)):
@@ -1881,10 +1918,10 @@ def admin_create_user(payload: UserRegisterRequest, user: dict = Depends(require
 
     role = payload.role.strip() if payload.role else "user"
 
-    if role not in {"user", "team_leader", "super_user"}:
+    if role not in (V2_ALL_ROLES - {"admin"}):
         raise HTTPException(status_code=400, detail="Invalid role")
 
-    if role != "super_user" and not team:
+    if role not in V2_TEAMLESS_ROLES and not team:
         raise HTTPException(status_code=400, detail="Please select the team first")
 
     if not username or not password:
@@ -2164,8 +2201,8 @@ def admin_reactivate_user(user_id: int, user: dict = Depends(require_admin)):
         team = row[1]
         role = row[2]
 
-        # Admin / Super User ko team ki zaroorat nahi
-        if role in {"admin", "super_user"}:
+        # Admin / Super User (aur V2 teamless roles) ko team ki zaroorat nahi
+        if role in V2_TEAMLESS_ROLES:
             cur.execute("""
                 UPDATE users
                 SET is_active = TRUE,
@@ -2281,7 +2318,7 @@ def admin_shift_user_team(
                 is_active = TRUE,
                 inactive_date = NULL,
                 target_applicable = CASE
-                    WHEN %s IN ('admin', 'super_user') THEN FALSE
+                    WHEN %s IN ('admin', 'super_user', 'city_coordinator', 'dashboard_admin') THEN FALSE
                     ELSE COALESCE(target_applicable, TRUE)
                 END
             WHERE id = %s
@@ -2358,6 +2395,9 @@ def list_teams(user: dict = Depends(get_current_user)):
     try:
         cur.execute("SELECT id, name, COALESCE(target_type, 'QTY') FROM teams ORDER BY name")
         rows = cur.fetchall()
+        if user.get("role") in SCOPED_V2_ROLES:
+            access = resolve_access(user)
+            rows = [r for r in rows if access.allows_team(r[1])]
         return {
             "teams": [
                 {"id": r[0], "name": r[1], "target_type": r[2]}
@@ -2424,7 +2464,9 @@ def delete_team(team_id: int, user: dict = Depends(require_admin)):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        cur.execute("DELETE FROM user_scopes WHERE scope_type = 'team' AND scope_id = %s", (team_id,))
         cur.execute("DELETE FROM teams WHERE id = %s", (team_id,))
+        v2_audit.record(cur, resolve_access(user), "team.delete", "team", team_id, {})
         conn.commit()
         return {"status": "ok", "message": "Team deleted"}
     finally:
@@ -2627,9 +2669,14 @@ def product_contribution_report(
         where.append("s.month = %s")
         params.append(clean_month[:3].title())
 
+    report_access = resolve_access(user)
     if clean_team and clean_team.lower() != "all":
+        assert_team_allowed(report_access, clean_team)
         where.append("s.team = %s")
         params.append(clean_team)
+    elif not report_access.org_wide:
+        where.append("s.team = ANY(%s)")
+        params.append(list(report_access.team_names or []))
 
     if clean_category and clean_category.lower() != "all":
         where.append("COALESCE(NULLIF(TRIM(p.category), ''), 'Uncategorized') = %s")
@@ -2782,7 +2829,7 @@ def health():
 
 
 @app.post("/upload")
-async def upload(file: UploadFile = File(...)):
+async def upload(file: UploadFile = File(...), user: dict = Depends(require_admin)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected")
     if not file.filename.lower().endswith((".xlsx", ".xls")):
@@ -2813,7 +2860,7 @@ async def upload(file: UploadFile = File(...)):
 
 
 @app.get("/dashboard")
-def dashboard():
+def dashboard(user: dict = Depends(require_org_viewer)):
     headers = {
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache",
@@ -2894,19 +2941,12 @@ def dashboard_from_db(team: str = "", user: dict = Depends(get_current_user)):
     try:
         cur = conn.cursor()
         cur.execute("SELECT name FROM teams ORDER BY name")
-        available_teams = [row[0] for row in cur.fetchall()]
+        available_teams = resolve_access(user).filter_teams([row[0] for row in cur.fetchall()])
     finally:
         conn.close()
 
-    if user.get("role") == "user":
-        user_team = str(user.get("team", "")).strip()
-        if team and team != user_team:
-            raise HTTPException(status_code=403, detail="You can only view your assigned team")
-
-    if user.get("role") == "team_leader":
-        leader_team = str(user.get("team", "")).strip()
-        if team and team != leader_team:
-            raise HTTPException(status_code=403, detail="Team leader can only view assigned team")
+    # V2: role + scope check (user / team_leader keep V1 rule: own team only)
+    assert_team_allowed(resolve_access(user), (team or "").strip())
     
     if not team:
         return {
@@ -3034,11 +3074,12 @@ def dashboard_from_db(team: str = "", user: dict = Depends(get_current_user)):
     return payload
 
 @app.get("/form/options")
-def get_form_options(team: str = ""):
+def get_form_options(team: str = "", user: dict = Depends(get_current_user)):
+    assert_team_allowed(resolve_access(user), (team or "").strip())
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        teams = fetch_lookup_values(conn, "teams")
+        teams = resolve_access(user).filter_teams(fetch_lookup_values(conn, "teams"))
 
         team = (team or "").strip()
         if not team:
@@ -3100,7 +3141,7 @@ def get_form_options(team: str = ""):
 
 
 @app.post("/form/team")
-def add_team(payload: dict):
+def add_form_team(payload: dict, user: dict = Depends(require_admin)):
     name = str(payload.get("name", "")).strip()
     if not name:
         raise HTTPException(status_code=400, detail="Team name is required")
@@ -3114,7 +3155,7 @@ def add_team(payload: dict):
 
 
 @app.put("/form/team/rename")
-def rename_team(payload: dict):
+def rename_team(payload: dict, user: dict = Depends(require_admin)):
     old_name = str(payload.get("old_name", "")).strip()
     new_name = str(payload.get("new_name", "")).strip()
 
@@ -3126,6 +3167,8 @@ def rename_team(payload: dict):
     try:
         cur.execute("UPDATE teams SET name = %s WHERE name = %s", (new_name, old_name))
         cur.execute("UPDATE sales_entries SET team = %s WHERE team = %s", (new_name, old_name))
+        v2_audit.record(cur, resolve_access(user), "team.rename", "team", old_name,
+                        {"old_name": old_name, "new_name": new_name})
         conn.commit()
         return {"status": "success", "old_name": old_name, "new_name": new_name}
     finally:
@@ -3142,6 +3185,13 @@ def add_entry(entry: dict, user: dict = Depends(get_current_user)):
     if user.get("role") in {"admin", "super_user"}:
         team = str(entry.get("team", "")).strip()
         sales_person = str(entry.get("sales_person", "")).strip()
+    elif user.get("role") == "dashboard_admin":
+        team = str(entry.get("team", "")).strip()
+        sales_person = str(entry.get("sales_person", "")).strip()
+        assert_team_allowed(resolve_access(user), team)
+        team = canonical_team(team) or ""
+        if not team:
+            raise HTTPException(status_code=400, detail="Team not found. Ask Super Admin to create it first.")
     else:
         team = str(user.get("team", "")).strip()
         sales_person = str(user.get("username", "")).strip()
@@ -3228,6 +3278,21 @@ def list_data_entries(user: dict = Depends(get_current_user)):
                 WHERE team = %s
                 ORDER BY entry_date DESC, id DESC
             """, (user.get("team", ""),))
+        elif user.get("role") in SCOPED_V2_ROLES:
+            scoped = resolve_access(user)
+            if scoped.org_wide:
+                cur.execute("""
+                    SELECT id, team, sales_person, client_name, client_category, product, year, month, quantity, amount, entry_date
+                    FROM sales_entries
+                    ORDER BY entry_date DESC, id DESC
+                """)
+            else:
+                cur.execute("""
+                    SELECT id, team, sales_person, client_name, client_category, product, year, month, quantity, amount, entry_date
+                    FROM sales_entries
+                    WHERE team = ANY(%s)
+                    ORDER BY entry_date DESC, id DESC
+                """, (list(scoped.team_names or []),))
         else:
             cur.execute("""
                 SELECT id, team, sales_person, client_name, client_category, product, year, month, quantity, amount, entry_date
@@ -3255,7 +3320,23 @@ def delete_data_entry(entry_id: int, user: dict = Depends(require_admin)):
     return {"status": "success"}
 
 @app.post("/data/upload")
-def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "append"):
+def upload_to_db(
+    file: UploadFile = File(...),
+    team: str = "",
+    mode: str = "append",
+    user: dict = Depends(get_current_user),
+):
+    upload_access = resolve_access(user)
+    if not upload_access.can(V2_UPLOAD_SALES):
+        raise HTTPException(status_code=403, detail="You do not have permission to upload sales data")
+    assert_team_allowed(upload_access, (team or "").strip())
+    if user.get("role") != "admin":
+        existing_team = canonical_team(team)
+        if not existing_team:
+            raise HTTPException(status_code=400, detail="Team not found. Ask Super Admin to create it first.")
+        team = existing_team
+    v2_audit.record_standalone(upload_access, "sales.upload", "team", (team or "").strip(),
+                               {"mode": mode, "filename": file.filename if file else None})
     print("UPLOAD ROUTE HIT", team, file.filename if file else "NO_FILE", flush=True)
     print("STEP 1: route started")
     try:
@@ -3554,13 +3635,16 @@ def upload_to_db(file: UploadFile = File(...), team: str = "", mode: str = "appe
 @app.post("/admin/clear-database")
 def clear_database(user: dict = Depends(get_current_user)):
 
-    if user.get("role") not in ["admin", "super_user"]:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    if not resolve_access(user).can(V2_SYSTEM_ADMIN):
+        raise HTTPException(status_code=403, detail="Super Admin access required")
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
+        v2_audit.record(cur, resolve_access(user), "database.clear", "database", None, {})
+        # team ids are recreated on re-upload; team scopes and branch mapping must be redone
+        cur.execute("DELETE FROM user_scopes WHERE scope_type = 'team'")
         cur.execute("DELETE FROM sales_entries")
         cur.execute("DELETE FROM teams")
         cur.execute("DELETE FROM sales_people")
@@ -3578,7 +3662,7 @@ def clear_database(user: dict = Depends(get_current_user)):
         conn.close()
 
 @app.post("/reset")
-def reset_dashboard():
+def reset_dashboard(user: dict = Depends(require_admin)):
     global DASHBOARD_CACHE
 
     DASHBOARD_CACHE = None
@@ -3634,7 +3718,12 @@ def reset_dashboard():
 
 
 @app.post("/salesperson-insights")
-def salesperson_insights(payload: SalespersonInsightsRequest):
+def salesperson_insights(payload: SalespersonInsightsRequest, user: dict = Depends(get_current_user)):
+    insights_access = resolve_access(user)
+    if payload.data_source == "database":
+        assert_team_allowed(insights_access, (payload.team or "").strip())
+    elif not insights_access.org_wide:
+        raise HTTPException(status_code=403, detail="Organization-wide access required")
     if payload.data_source == "database":
         dashboard_payload = get_database_dashboard_payload(payload.team or "")
     else:
@@ -3662,13 +3751,28 @@ def salesperson_insights(payload: SalespersonInsightsRequest):
         },
     }
 
+def visit_owner(user: dict, team: str, sales_person: str):
+    """Team + salesperson a visit is recorded for. Admin and (in-scope) Dashboard Admin may
+    enter visits on behalf of an employee; everyone else records their own visits (V1 rule)."""
+    role = user.get("role")
+    if role == "admin":
+        return (team or "").strip(), (sales_person or "").strip()
+    if role == "dashboard_admin":
+        assert_team_allowed(resolve_access(user), (team or "").strip())
+        canonical = canonical_team(team)
+        if not canonical:
+            raise HTTPException(status_code=400, detail="Team not found")
+        return canonical, (sales_person or "").strip()
+    return user.get("team", ""), user.get("username", "")
+
+
 @app.post("/api/visit-entry")
 def create_visit_entry(payload: VisitEntryRequest, user: dict = Depends(get_current_user)):
     row = {
         "created_by": user.get("username", ""),
         "created_at": now_iso(),
-        "team": payload.team.strip() if user.get("role") == "admin" else user.get("team", ""),
-        "sales_person": payload.sales_person.strip() if user.get("role") == "admin" else user.get("username", ""),
+        "team": visit_owner(user, payload.team, payload.sales_person)[0],
+        "sales_person": visit_owner(user, payload.team, payload.sales_person)[1],
         "client_name": payload.client_name.strip(),
         "client_category": payload.client_category.strip(),
         "product": payload.product.strip(),
@@ -3724,8 +3828,8 @@ def create_visit_entries_bulk(payload: VisitBulkRequest, user: dict = Depends(ge
         row = {
             "created_by": user.get("username", ""),
             "created_at": now_iso(),
-            "team": item.team.strip() if user.get("role") == "admin" else user.get("team", ""),
-            "sales_person": item.sales_person.strip() if user.get("role") == "admin" else user.get("username", ""),
+            "team": visit_owner(user, item.team, item.sales_person)[0],
+            "sales_person": visit_owner(user, item.team, item.sales_person)[1],
             "client_name": item.client_name.strip(),
             "client_category": item.client_category.strip(),
             "product": item.product.strip(),
@@ -3801,6 +3905,19 @@ def list_visit_entries(user: dict = Depends(get_current_user)):
                 WHERE team = %s
                 ORDER BY meeting_date DESC, meeting_time DESC, id DESC
             """, (user.get("team", ""),))
+        elif user.get("role") in SCOPED_V2_ROLES:
+            scoped = resolve_access(user)
+            if scoped.org_wide:
+                cur.execute("""
+                    SELECT * FROM visit_entries
+                    ORDER BY meeting_date DESC, meeting_time DESC, id DESC
+                """)
+            else:
+                cur.execute("""
+                    SELECT * FROM visit_entries
+                    WHERE team = ANY(%s)
+                    ORDER BY meeting_date DESC, meeting_time DESC, id DESC
+                """, (list(scoped.team_names or []),))
         else:
             cur.execute("""
                 SELECT * FROM visit_entries
@@ -3955,8 +4072,9 @@ def update_visit_entry(visit_id: int, payload: VisitEntryRequest, user: dict = D
         conn.close()
 
 @app.get("/forecast")
-def get_forecast(team: str = "", month: str = "", year: int = 0):
+def get_forecast(team: str = "", month: str = "", year: int = 0, user: dict = Depends(get_current_user)):
     team = team.strip()
+    assert_team_allowed(resolve_access(user), team)
     month = month.strip()[:3].title()
 
     if not team:

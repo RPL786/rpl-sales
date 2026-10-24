@@ -44,9 +44,15 @@ const forecastUnitLabel = data[0]?.target_type === "AMOUNT" ? "Rs" : "Qty";
     }
 
     fetch(`/forecast?team=${encodeURIComponent(selectedTeam)}&month=${encodeURIComponent(selectedMonth)}`)
-      .then((res) => res.json())
-      .then((items) => setData(items))
-      .catch((err) => console.error("Forecast error:", err));
+      .then(async (res) => {
+        const items = await res.json();
+        // 403 (team outside scope) or other errors return an object, not a list
+        setData(res.ok && Array.isArray(items) ? items : []);
+      })
+      .catch((err) => {
+        console.error("Forecast error:", err);
+        setData([]);
+      });
   }, [selectedTeam, selectedMonth]);
 
   const teamTotal = data.reduce(

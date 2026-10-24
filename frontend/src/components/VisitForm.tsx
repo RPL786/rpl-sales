@@ -63,7 +63,15 @@ const emptyRow: VisitRow = {
   notes: "",
 };
 
-const VISIT_DRAFT_KEY = "ressichem_visit_form_draft_v1";
+// Draft is stored per user so people sharing a browser never see each other's unsaved visits
+const VISIT_DRAFT_KEY = (() => {
+  try {
+    const u = JSON.parse(localStorage.getItem("auth_user") || "{}");
+    return `ressichem_visit_form_draft_v2:${u?.id ?? u?.username ?? "_"}`;
+  } catch {
+    return "ressichem_visit_form_draft_v2:_";
+  }
+})();
 
 function todayDate() {
   return new Date().toISOString().slice(0, 10);
@@ -88,7 +96,8 @@ export default function VisitForm() {
   const authUser = useMemo(() => getAuthUser(), []);
   const isAdmin = authUser?.role === "admin";
   const canViewAllTeams = authUser?.role === "admin" || authUser?.role === "super_user";
-  const canSelectTeamAndSalesPerson = authUser?.role === "admin" || authUser?.role === "super_user";
+  const canSelectTeamAndSalesPerson =
+    authUser?.role === "admin" || authUser?.role === "super_user" || authUser?.role === "dashboard_admin";
 
   const savedDraft = useMemo(() => {
     try {

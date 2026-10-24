@@ -51,12 +51,39 @@ import "./sales_ai_insights.css";
 import ForecastTab from "./components/ForecastTab";
 import RessiBot from "./components/RessiBot";
 import ProductContributionTab from "./components/ProductContributionTab";
+import OrgAdmin from "./v2/OrgAdmin";
+import { ThemeToggle, useTheme } from "./v2/theme";
+import { apiJson } from "./v2/authFetch";
+import { Building2, ClipboardList, LineChart as LineChartIcon, MapPin, Settings2 } from "lucide-react";
 
 type ClientStatus = "new" | "lost" | "retained";
 type Severity = "high" | "medium" | "low";
 type RecoveryPriority = "high" | "medium" | "low";
 type InsightTone = "positive" | "warning" | "negative" | "neutral";
-type TabKey = "overview" | "clients" | "products" | "team" | "recovery" | "executive" | "visit" | "dataEntry" | "admin" | "forecast" | "productContribution";
+type TabKey = "overview" | "clients" | "products" | "team" | "recovery" | "executive" | "visit" | "dataEntry" | "admin" | "forecast" | "productContribution" | "organization";
+
+type OrgTreeTeam = { id: number; name: string; branch_id: number | null };
+type OrgTreeBranch = { id: number; city_id: number; name: string; code: string; teams: OrgTreeTeam[] };
+type OrgTreeCity = { id: number; name: string; code: string; branches: OrgTreeBranch[] };
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Super Admin",
+  super_user: "Boss / Executive",
+  city_coordinator: "City Coordinator",
+  dashboard_admin: "Dashboard Admin",
+  team_leader: "Team Leader",
+  user: "Team Member",
+};
+
+const NAV_GROUPS: { key: string; label: string; tabs: TabKey[] }[] = [
+  {
+    key: "intel",
+    label: "Sales Intelligence",
+    tabs: ["overview", "clients", "products", "team", "recovery", "executive", "forecast", "productContribution"],
+  },
+  { key: "field", label: "Field Operations", tabs: ["visit", "dataEntry"] },
+  { key: "admin", label: "Administration", tabs: ["admin", "organization"] },
+];
 
 type Summary = {
   current_year?: number;
@@ -399,9 +426,14 @@ function App() {
     const raw = localStorage.getItem("auth_user");
     return raw ? JSON.parse(raw) : null;
   });
-  const isAdmin = authUser?.role === "admin";
-  const isSuperUser = authUser?.role === "super_user";
+  const userRole: string = authUser?.role || "";
+  const isAdmin = userRole === "admin";
+  const isSuperUser = userRole === "super_user";
+  // V2 scoped roles see dashboards, but only for teams inside their city/branch/team scope
+  const isScopedManager = userRole === "city_coordinator" || userRole === "dashboard_admin";
   const canViewAllTeams = isAdmin || isSuperUser;
+  const canViewDashboards = canViewAllTeams || isScopedManager;
+  const { theme, toggle: toggleTheme } = useTheme();
 
   
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
@@ -481,11 +513,12 @@ if (!authUser) {
 
   const [activeTab, setActiveTab] = useState(() => {
     const user = JSON.parse(localStorage.getItem("auth_user") || "{}");
-    return user?.role === "admin" ? "admin" : "visit";
+    if (user?.role === "admin") return "admin";
+    return canViewDashboards ? "overview" : "visit";
   });
 
   useEffect(() => {
-    if (activeTab === "admin" && authUser?.role !== "admin") {
+    if ((activeTab === "admin" || activeTab === "organization") && authUser?.role !== "admin") {
       setActiveTab("visit");
     }
   }, [activeTab, authUser]);
@@ -500,9 +533,14 @@ if (!authUser) {
     stored?.selectedProducts ?? []
   );
   const [displayUnit, setDisplayUnit] = useState<"bag" | "kg">(stored?.displayUnit ?? "bag");
-  const [dataSource, setDataSource] = useState<"excel" | "database">(stored?.dataSource ?? "excel");
+  const [dataSource, setDataSource] = useState<"excel" | "database">(
+    isScopedManager ? "database" : stored?.dataSource ?? "excel"
+  );
   const [selectedTeam, setSelectedTeam] = useState("");
   const [masterTeams, setMasterTeams] = useState<{ id: number; name: string }[]>([]);
+  const [orgCities, setOrgCities] = useState<OrgTreeCity[]>([]);
+  const [selectedCityId, setSelectedCityId] = useState<string>("all");
+  const [selectedBranchId, setSelectedBranchId] = useState<string>("all");
   const [productDropdownOpen, setProductDropdownOpen] = useState(false);
   const [productDropdownDirection, setProductDropdownDirection] = useState<"down" | "up">("down");
   const [productSearch, setProductSearch] = useState(stored?.productSearch ?? "");
@@ -538,7 +576,33 @@ if (!authUser) {
     { key: "dataEntry", label: "Data Entry", icon: <Package size={16} /> },
     { key: "forecast", label: "Forecast", icon: <TrendingUp size={16} /> },
     { key: "productContribution", label: "Product Contribution", icon: <BarChart3 size={16} /> },
+    { key: "organization", label: "Organization", icon: <Building2 size={16} /> },
   ];
+
+  const visibleTabs = tabs.filter((tab) => {
+    if (tab.key === "admin" || tab.key === "organization") return isAdmin;
+    if (canViewDashboards) return true;
+    return tab.key === "visit" || tab.key === "dataEntry";
+  });
+  const visibleGroups = NAV_GROUPS.map((g) => ({
+    ...g,
+    items: visibleTabs.filter((t) => g.tabs.includes(t.key)),
+  })).filter((g) => g.items.length > 0);
+  const activeGroup = visibleGroups.find((g) => g.tabs.includes(activeTab as TabKey)) ?? visibleGroups[0];
+  const groupIcon = (key: string) =>
+    key === "intel" ? <LineChartIcon size={15} /> : key === "field" ? <ClipboardList size={15} /> : <Settings2 size={15} />;
+
+  // City > Branch filter narrows the Team list (scope is enforced by the backend as well)
+  const branchOptions = orgCities
+    .filter((c) => selectedCityId === "all" || String(c.id) === selectedCityId)
+    .flatMap((c) => c.branches.map((b) => ({ ...b, cityName: c.name })));
+  const teamIdsInFilter = new Set(
+    branchOptions
+      .filter((b) => selectedBranchId === "all" || String(b.id) === selectedBranchId)
+      .flatMap((b) => b.teams.map((t) => t.id))
+  );
+  const orgFilterActive = selectedCityId !== "all" || selectedBranchId !== "all";
+  const visibleTeams = orgFilterActive ? masterTeams.filter((t) => teamIdsInFilter.has(t.id)) : masterTeams;
 
   useEffect(() => {
     const payload = {
@@ -601,8 +665,10 @@ if (!authUser) {
     setFocusedScorecard(null);
     setPagination({ clientPage: 1, productPage: 1, recoveryPage: 1 });
     setDisplayUnit("bag");
-    setDataSource("excel");
+    setDataSource(isScopedManager ? "database" : "excel");
     setSelectedTeam("");
+    setSelectedCityId("all");
+    setSelectedBranchId("all");
   };
 
   const fetchJson = async (url: string, init?: RequestInit) => {
@@ -847,12 +913,24 @@ if (!authUser) {
 
   useEffect(() => {
     setLoading(false);
+    if (!canViewDashboards) return; // members/leaders only use Field Operations
     loadDashboard();
   }, [dataSource, selectedTeam]);
 
   useEffect(() => {
     loadMasterTeams();
+    if (canViewDashboards) {
+      apiJson<{ cities: OrgTreeCity[] }>("/api/v2/org/tree")
+        .then((tree) => setOrgCities(tree.cities || []))
+        .catch(() => setOrgCities([]));
+    }
   }, []);
+
+  useEffect(() => {
+    if (selectedTeam && orgFilterActive && !visibleTeams.some((t) => t.name === selectedTeam)) {
+      setSelectedTeam("");
+    }
+  }, [selectedCityId, selectedBranchId]);
 
   
   useEffect(() => {
@@ -2458,7 +2536,7 @@ const productSelectionLabel =
               <p className="eyebrow">Sales Review Application</p>
               <h1>Executive Dashboard</h1>
               <p className="subtext">
-                The current codebase has been enhanced with improved performance, pagination, data persistence, metadata management, and a more streamlined tab workflow
+                Sales Command Center — city, branch, team aur salesperson performance ek hi workspace mein.
               </p>
             </div>
             <div className="header-actions">
@@ -2570,6 +2648,26 @@ const productSelectionLabel =
                 </>
               )}
 
+              {userRole === "dashboard_admin" && (
+                <button
+                  className="action-btn"
+                  onClick={() => {
+                    if (!selectedTeam) {
+                      alert("Please first select team");
+                      return;
+                    }
+                    document.getElementById("db-upload-input")?.click();
+                  }}
+                  disabled={uploading}
+                >
+                  <Upload size={16} />
+                  {uploading ? "Uploading DB..." : "Upload DB Excel"}
+                </button>
+              )}
+              <span className="v2-role-chip" title="Your role">
+                <Shield size={13} /> {ROLE_LABELS[userRole] || userRole}
+              </span>
+              <ThemeToggle theme={theme} onToggle={toggleTheme} />
               <button className="action-btn" onClick={handleLogout}>
                 Logout ({authUser.username})
               </button>
@@ -2604,33 +2702,41 @@ const productSelectionLabel =
               </div>
             </div>
 
-            <div className="tabs-shell hero-tabs-inline">
-              {tabs.filter(tab => {
-                if (tab.key === "admin") {
-                  return isAdmin;
-                }
-
-                if (canViewAllTeams) {
-                  return true;
-                }
-
-                return tab.key === "visit" || tab.key === "dataEntry";
-              }).map((tab) => (
-                <button
-                  key={tab.key}
-                  className={`tab-btn ${activeTab === tab.key ? "active" : ""}`}
-                  onClick={() => setActiveTab(tab.key)}
-                >
-                  {tab.icon}
-                  <span>{tab.label}</span>
-                </button>
-              ))}
-            </div>
+            <nav className="v2-nav" aria-label="Main navigation">
+              {visibleGroups.length > 1 && (
+                <div className="v2-nav-groups">
+                  {visibleGroups.map((g) => (
+                    <button
+                      key={g.key}
+                      className={`v2-nav-group ${activeGroup?.key === g.key ? "active" : ""}`}
+                      onClick={() => {
+                        if (!g.tabs.includes(activeTab as TabKey)) setActiveTab(g.items[0].key);
+                      }}
+                    >
+                      {groupIcon(g.key)}
+                      <span>{g.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="tabs-shell hero-tabs-inline v2-nav-tabs">
+                {(activeGroup?.items ?? []).map((tab) => (
+                  <button
+                    key={tab.key}
+                    className={`tab-btn ${activeTab === tab.key ? "active" : ""}`}
+                    onClick={() => setActiveTab(tab.key)}
+                  >
+                    {tab.icon}
+                    <span>{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+            </nav>
           </div>
         </div>
        
-        <div className="dashboard-body" style={{ gridTemplateColumns: canViewAllTeams ? undefined : "1fr" }}>
-          <div className="left-rail" style={{ display: canViewAllTeams ? undefined : "none" }}>
+        <div className="dashboard-body" style={{ gridTemplateColumns: canViewDashboards ? undefined : "1fr" }}>
+          <div className="left-rail" style={{ display: canViewDashboards ? undefined : "none" }}>
             <div className="card filter-shell">
           <div className="section-head">
             <div>
@@ -2748,7 +2854,7 @@ const productSelectionLabel =
                 onChange={(e) => setDataSource(e.target.value as "excel" | "database")}
                 className="filter-select"
               >
-                <option value="excel">Excel Upload</option>
+                <option value="excel" disabled={isScopedManager}>Excel Upload</option>
                 <option value="database">Database</option>
               </select>
             </div>
@@ -2762,6 +2868,42 @@ const productSelectionLabel =
               </select>
             </div>
 
+            {dataSource === "database" && orgCities.length > 0 && (
+              <>
+                <div className="filter-block">
+                  <label><MapPin size={14} /> City</label>
+                  <select
+                    value={selectedCityId}
+                    onChange={(e) => {
+                      setSelectedCityId(e.target.value);
+                      setSelectedBranchId("all");
+                    }}
+                    className="filter-select"
+                  >
+                    <option value="all">All Cities</option>
+                    {orgCities.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="filter-block">
+                  <label><Building2 size={14} /> Branch</label>
+                  <select
+                    value={selectedBranchId}
+                    onChange={(e) => setSelectedBranchId(e.target.value)}
+                    className="filter-select"
+                  >
+                    <option value="all">All Branches</option>
+                    {branchOptions.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {selectedCityId === "all" ? `${b.cityName} / ${b.name}` : b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+
             {dataSource === "database" && (
               <div className="filter-block">
                 <label><Users size={14} /> Team</label>
@@ -2771,7 +2913,7 @@ const productSelectionLabel =
                   className="filter-select"
                 >
                   <option value="">Select Team</option>
-                  {masterTeams.map((team) => (
+                  {visibleTeams.map((team) => (
                     <option key={team.id} value={team.name}>
                       {team.name}
                     </option>
@@ -2903,7 +3045,7 @@ const productSelectionLabel =
         
         </div>
 
-        <div className="right-panel" style={{ width: canViewAllTeams ? undefined : "100%" }}>
+        <div className="right-panel" style={{ width: canViewDashboards ? undefined : "100%" }}>
           <div className="tab-content">
             {activeTab === "overview" && renderOverviewTab()}
             {activeTab === "clients" && renderClientsTab()}
@@ -2915,7 +3057,8 @@ const productSelectionLabel =
             {activeTab === "dataEntry" && <DataEntry />}
             {activeTab === "forecast" && <ForecastTab />}
             {activeTab === "productContribution" && <ProductContributionTab />}
-            {activeTab === "admin" && isAdmin && <AdminPanel />}            
+            {activeTab === "admin" && isAdmin && <AdminPanel />}
+            {activeTab === "organization" && isAdmin && <OrgAdmin />}            
           </div>
         </div>
       </div>

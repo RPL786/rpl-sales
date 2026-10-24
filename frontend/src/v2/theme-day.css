@@ -1,0 +1,277 @@
+/* RPL Sales V2 — Day mode.
+   Night mode = existing App.css (unchanged). Day mode overrides tokens + the
+   surfaces that App.css hard-codes for the dark look. Same layout, same components. */
+
+html[data-theme="day"] {
+  --bg: #f3f5fb;
+  --bg-soft: rgba(255, 255, 255, 0.78);
+  --panel: rgba(255, 255, 255, 0.86);
+  --panel-strong: #ffffff;
+  --line: rgba(30, 41, 89, 0.12);
+  --text: #0f1a33;
+  --muted: #55657e;
+  --primary: #5b5ef0;
+  --primary-2: #7c4ddc;
+  --green: #059669;
+  --red: #dc2626;
+  --amber: #d97706;
+  --cyan: #0891b2;
+  --shadow: 0 14px 34px rgba(30, 41, 89, 0.10);
+}
+
+html[data-theme="day"],
+html[data-theme="day"] body,
+html[data-theme="day"] #root {
+  background:
+    radial-gradient(circle at top left, rgba(99, 102, 241, 0.12), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(6, 182, 212, 0.10), transparent 32%),
+    linear-gradient(180deg, #f6f7fd 0%, #eef1f9 55%, #f4f6fb 100%);
+  color: var(--text);
+}
+
+html[data-theme="day"] .dashboard-grid-overlay {
+  background-image:
+    linear-gradient(rgba(30, 41, 89, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 41, 89, 0.045) 1px, transparent 1px);
+}
+html[data-theme="day"] .dashboard-bg-orb { opacity: 0.18; }
+
+/* Surfaces */
+html[data-theme="day"] .card,
+html[data-theme="day"] .hero-card,
+html[data-theme="day"] .scorecard {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 251, 255, 0.90));
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+}
+html[data-theme="day"] .hero-card {
+  background:
+    linear-gradient(135deg, rgba(99, 102, 241, 0.10), rgba(139, 92, 246, 0.06) 45%, rgba(6, 182, 212, 0.06)),
+    #ffffff;
+}
+html[data-theme="day"] .mini-card,
+html[data-theme="day"] .mini-highlight,
+html[data-theme="day"] .list-box,
+html[data-theme="day"] .hero-stat,
+html[data-theme="day"] .hero-pill,
+html[data-theme="day"] .month-chip,
+html[data-theme="day"] .info-banner,
+html[data-theme="day"] .soft-counter,
+html[data-theme="day"] .filter-chip {
+  background: rgba(91, 94, 240, 0.05);
+  border-color: var(--line);
+  color: var(--text);
+}
+html[data-theme="day"] .focus-box { background: rgba(91, 94, 240, 0.08); }
+html[data-theme="day"] .insight-card p { color: #33415c; }
+html[data-theme="day"] .eyebrow { color: #5b5ef0; }
+
+/* Controls */
+html[data-theme="day"] .action-btn,
+html[data-theme="day"] .ghost-btn,
+html[data-theme="day"] .filter-select,
+html[data-theme="day"] .search-box,
+html[data-theme="day"] .product-dropdown-trigger,
+html[data-theme="day"] .product-dropdown-search,
+html[data-theme="day"] .dropdown-search,
+html[data-theme="day"] input,
+html[data-theme="day"] textarea {
+  background: #ffffff;
+  color: var(--text);
+  border-color: rgba(30, 41, 89, 0.16);
+}
+html[data-theme="day"] .primary-btn,
+html[data-theme="day"] .upload-btn {
+  background: linear-gradient(135deg, #5b5ef0, #7c4ddc);
+  color: #ffffff;
+  border-color: transparent;
+}
+html[data-theme="day"] .filter-select option,
+html[data-theme="day"] select option {
+  background: #ffffff;
+  color: #0f1a33;
+}
+html[data-theme="day"] .product-dropdown-menu,
+html[data-theme="day"] .dropdown-panel,
+html[data-theme="day"] .search-dropdown {
+  background: #ffffff;
+  border-color: var(--line);
+}
+html[data-theme="day"] .dropdown-item:hover,
+html[data-theme="day"] .dropdown-check-row:hover { background: rgba(91, 94, 240, 0.07); }
+
+html[data-theme="day"] .tab-btn {
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--text);
+  border-color: var(--line);
+}
+html[data-theme="day"] .tab-btn.active {
+  background: linear-gradient(135deg, #5b5ef0, #7c4ddc);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 6px 16px rgba(91, 94, 240, 0.28);
+}
+
+/* Tables */
+html[data-theme="day"] .table-wrap { border-color: var(--line); background: #ffffff; }
+html[data-theme="day"] .data-table th,
+html[data-theme="day"] .data-table td,
+html[data-theme="day"] .forecast-table th,
+html[data-theme="day"] .forecast-table td { border-bottom-color: rgba(30, 41, 89, 0.08); color: var(--text); }
+html[data-theme="day"] .data-table thead th,
+html[data-theme="day"] .forecast-table thead th { background: #eef0fb; color: #27345a; }
+html[data-theme="day"] .data-table tbody tr:hover { background: rgba(91, 94, 240, 0.05); }
+
+/* Charts */
+html[data-theme="day"] .recharts-default-tooltip {
+  background: #ffffff !important;
+  border-color: var(--line) !important;
+  color: var(--text) !important;
+}
+html[data-theme="day"] .recharts-cartesian-grid line { stroke: rgba(30, 41, 89, 0.10); }
+
+/* Status chips keep their semantic colors but readable on light */
+html[data-theme="day"] .positive-value,
+html[data-theme="day"] .positive { color: #047857; }
+html[data-theme="day"] .negative-value,
+html[data-theme="day"] .negative { color: #b91c1c; }
+
+/* ---------- Shared V2 shell pieces (both themes) ---------- */
+.theme-toggle { gap: 6px; }
+
+.v2-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.v2-nav-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.v2-nav-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 15px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+.v2-nav-group.active {
+  color: var(--text);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.30), rgba(6, 182, 212, 0.18));
+  border-color: rgba(99, 102, 241, 0.45);
+}
+html[data-theme="day"] .v2-nav-group { background: #ffffff; }
+html[data-theme="day"] .v2-nav-group.active {
+  background: linear-gradient(135deg, rgba(91, 94, 240, 0.14), rgba(8, 145, 178, 0.10));
+  color: #27345a;
+}
+.v2-nav-tabs .tab-btn { padding: 8px 13px; font-size: 13px; }
+
+.v2-role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.14);
+  color: var(--text);
+}
+
+/* Organization admin */
+.org-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+@media (max-width: 1100px) {
+  .org-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.org-city {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+html[data-theme="day"] .org-city { background: #fbfbff; }
+.org-city-head,
+.org-branch-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.org-branch {
+  margin: 10px 0 0 10px;
+  padding-left: 12px;
+  border-left: 2px solid rgba(99, 102, 241, 0.35);
+}
+.org-team-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.org-team-chip {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  background: rgba(16, 185, 129, 0.10);
+}
+.org-code {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.org-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+.org-form-row .filter-select { width: auto; min-width: 140px; flex: 1 1 140px; }
+.org-muted { color: var(--muted); font-size: 12px; }
+.org-scope-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.org-scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.10);
+}
+.org-scope-chip button {
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+}
+
+html[data-theme="day"] .status.error { color: #b91c1c; }
+html[data-theme="day"] .status.success { color: #047857; }
+html[data-theme="day"] .status.loading { color: #1d4ed8; }
+
+/* Logo artwork is white: keep it on a navy plate in Day mode */
+html[data-theme="day"] .logo-top-wrap {
+  background: linear-gradient(135deg, #0b1730, #232f66);
+  border-color: rgba(30, 41, 89, 0.25);
+  box-shadow: 0 6px 16px rgba(15, 26, 51, 0.18);
+}
