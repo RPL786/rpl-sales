@@ -1,6 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import jsPDF from "jspdf";
-import "jspdf-autotable";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertCircle,
   BarChart3,
@@ -44,14 +42,14 @@ import {
 } from "recharts";
 import "./App.css";
 import SalesAiInsightsPanel from "./components/SalesAiInsightsPanel";
-import VisitForm from "./components/VisitForm";
-import DataEntry from "./DataEntry";
-import AdminPanel from "./components/AdminPanel";
+const VisitForm = lazy(() => import("./components/VisitForm"));
+const DataEntry = lazy(() => import("./DataEntry"));
+const AdminPanel = lazy(() => import("./components/AdminPanel"));
 import "./sales_ai_insights.css";
-import ForecastTab from "./components/ForecastTab";
-import RessiBot from "./components/RessiBot";
-import ProductContributionTab from "./components/ProductContributionTab";
-import OrgAdmin from "./v2/OrgAdmin";
+const ForecastTab = lazy(() => import("./components/ForecastTab"));
+const RessiBot = lazy(() => import("./components/RessiBot"));
+const ProductContributionTab = lazy(() => import("./components/ProductContributionTab"));
+const OrgAdmin = lazy(() => import("./v2/OrgAdmin"));
 import { useTheme } from "./v2/theme";
 import Sidebar, { APP_VERSION } from "./v2/Sidebar";
 import LoginPage from "./v2/LoginPage";
@@ -63,6 +61,19 @@ type ClientStatus = "new" | "lost" | "retained";
 type Severity = "high" | "medium" | "low";
 type RecoveryPriority = "high" | "medium" | "low";
 type InsightTone = "positive" | "warning" | "negative" | "neutral";
+// PDF libraries are only downloaded when someone exports a PDF
+const loadPdf = async () => {
+  const mod = await import("jspdf");
+  await import("jspdf-autotable");
+  return { jsPDF: mod.default };
+};
+
+const TabFallback = () => (
+  <div className="card v2-skeleton" aria-busy="true">
+    <div /> <div /> <div />
+  </div>
+);
+
 type TabKey = "overview" | "clients" | "products" | "team" | "recovery" | "executive" | "visit" | "dataEntry" | "admin" | "forecast" | "productContribution" | "organization";
 
 type OrgTreeTeam = { id: number; name: string; branch_id: number | null };
@@ -1467,13 +1478,14 @@ const productSelectionLabel =
     return `Team: ${teamText} | Sales Person: ${salesText} | Month: ${monthText} | Products: ${productText} | View: ${getViewLabel()}`;
   };
 
-  const downloadClientDrilldownPdf = () => {
+  const downloadClientDrilldownPdf = async () => {
     try {
       if (!filteredClientDrilldown.length) {
         alert("PDF ke liye koi client data available nahi hai.");
         return;
       }
 
+      const { jsPDF } = await loadPdf();
       const doc = new jsPDF("l", "mm", "a4");
 
       doc.setFontSize(16);
@@ -1543,13 +1555,14 @@ const productSelectionLabel =
     }
   };
 
-  const downloadProductIntelligencePdf = () => {
+  const downloadProductIntelligencePdf = async () => {
     try {
       if (!filteredProductDrilldown.length) {
         alert("PDF ke liye koi product data available nahi hai.");
         return;
       }
 
+      const { jsPDF } = await loadPdf();
       const doc = new jsPDF("l", "mm", "a4");
 
       doc.setFontSize(16);
@@ -3052,6 +3065,7 @@ const productSelectionLabel =
         </div>
 
         <div className="right-panel" style={{ width: canViewDashboards ? undefined : "100%" }}>
+          <Suspense fallback={<TabFallback />}>
           <div className="tab-content v2-page-enter" key={activeTab}>
             {activeTab === "overview" && renderOverviewTab()}
             {activeTab === "clients" && renderClientsTab()}
@@ -3064,12 +3078,17 @@ const productSelectionLabel =
             {activeTab === "forecast" && <ForecastTab />}
             {activeTab === "productContribution" && <ProductContributionTab />}
             {activeTab === "admin" && isAdmin && <AdminPanel />}
-            {activeTab === "organization" && isAdmin && <OrgAdmin />}            
+            {activeTab === "organization" && isAdmin && <OrgAdmin />}
           </div>
+          </Suspense>
         </div>
       </div>
 
-        {(isAdmin || isSuperUser) && <RessiBot apiBaseUrl={API_BASE_URL} />}
+        {(isAdmin || isSuperUser) && (
+          <Suspense fallback={null}>
+            <RessiBot apiBaseUrl={API_BASE_URL} />
+          </Suspense>
+        )}
 
         <div className="footer">
           © {new Date().getFullYear()} Created by Adil Siddiqui — Ressichem Pvt Ltd · RPL Sales v{APP_VERSION}

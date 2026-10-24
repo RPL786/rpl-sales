@@ -7,3 +7,5 @@ frontend/dist/
 backend/.env
 __pycache__/
 *.pyc
+# local SQLite leftovers (app uses PostgreSQL)
+*.db

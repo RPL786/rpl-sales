@@ -809,3 +809,16 @@ html[data-theme="day"] .chart-wrap {
 .recharts-pie:hover .recharts-sector { opacity: 0.75; }
 .recharts-pie .recharts-sector:hover { opacity: 1; filter: drop-shadow(0 6px 12px rgba(var(--accent-rgb), 0.45)); }
 .recharts-bar-rectangle:hover path { filter: drop-shadow(0 6px 14px rgba(var(--accent-rgb), 0.55)); }
+
+/* Loading skeleton while a tab's code downloads */
+.v2-skeleton { display: grid; gap: 12px; min-height: 180px; }
+.v2-skeleton > div {
+  height: 18px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(127,127,140,0.10), rgba(127,127,140,0.22), rgba(127,127,140,0.10));
+  background-size: 200% 100%;
+  animation: v2-skel 1.2s ease-in-out infinite;
+}
+.v2-skeleton > div:nth-child(1) { width: 40%; height: 24px; }
+.v2-skeleton > div:nth-child(3) { width: 70%; }
+@keyframes v2-skel { from { background-position: 200% 0; } to { background-position: -200% 0; } }
