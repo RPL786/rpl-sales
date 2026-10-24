@@ -81,6 +81,7 @@ DDL = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
     """,
+    "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS accent TEXT NOT NULL DEFAULT 'orange'",
     # --- Audit ---------------------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS audit_events (

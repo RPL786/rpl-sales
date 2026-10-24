@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { LogOut, Moon, Sun } from "lucide-react";
 import type { Theme } from "./theme";
+import { ACCENTS, ACCENT_KEYS, type Accent } from "./accent";
 
 export const APP_VERSION = "2.0";
 
@@ -15,6 +16,8 @@ type Props = {
   roleLabel: string;
   theme: Theme;
   onToggleTheme: () => void;
+  accent: Accent;
+  onAccent: (a: Accent) => void;
   onLogout: () => void;
 };
 
@@ -31,6 +34,8 @@ export default function Sidebar({
   roleLabel,
   theme,
   onToggleTheme,
+  accent,
+  onAccent,
   onLogout,
 }: Props) {
   const isNight = theme === "night";
@@ -72,6 +77,24 @@ export default function Sidebar({
       </nav>
 
       <div className="v2-side-bottom">
+        <div className="v2-accent-picker" role="radiogroup" aria-label="Accent color">
+          <span className="v2-side-group-label">Theme color</span>
+          <div className="v2-accent-dots">
+            {ACCENT_KEYS.map((key) => (
+              <button
+                key={key}
+                type="button"
+                role="radio"
+                aria-checked={accent === key}
+                aria-label={ACCENTS[key].label}
+                title={ACCENTS[key].label}
+                className={`v2-accent-dot ${accent === key ? "active" : ""}`}
+                style={{ background: `linear-gradient(135deg, ${ACCENTS[key].light}, ${ACCENTS[key].main})` }}
+                onClick={() => onAccent(key)}
+              />
+            ))}
+          </div>
+        </div>
         <button type="button" className="v2-side-item v2-theme-switch" onClick={onToggleTheme}>
           <span className="v2-side-icon">{isNight ? <Sun size={16} /> : <Moon size={16} />}</span>
           <span className="v2-side-label">{isNight ? "Day mode" : "Night mode"}</span>
