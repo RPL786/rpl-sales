@@ -257,6 +257,11 @@ def test_theme_preference_persists(client, org):
     h2 = login(client, "ali", "pass1234")
     assert client.get("/api/v2/me", headers=h2).json()["preferences"]["theme"] == "day"
     assert client.put("/api/v2/me/preferences", json={"theme": "pink"}, headers=h).status_code == 422
+    r = client.put("/api/v2/me/preferences", json={"accent": "emerald"}, headers=h)
+    assert r.status_code == 200 and r.json()["preferences"] == {"theme": "day", "accent": "emerald"}
+    assert client.get("/api/v2/me", headers=h).json()["preferences"]["accent"] == "emerald"
+    assert client.put("/api/v2/me/preferences", json={"accent": "gold"}, headers=h).status_code == 422
+    assert client.put("/api/v2/me/preferences", json={}, headers=h).status_code == 400
 
 
 def test_audit_trail_records_changes(client, admin, org):

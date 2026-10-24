@@ -44,13 +44,13 @@ def _clean_name(name: str) -> str:
 # ---------------------------------------------------------------- me / prefs
 @router.get("/me")
 def me(access: Access = Depends(get_access)):
-    theme = "night"
+    theme, accent = "night", "orange"
     if access.user_id is not None:
         with transaction() as cur:
-            cur.execute("SELECT theme FROM user_preferences WHERE user_id = %s", (access.user_id,))
+            cur.execute("SELECT theme, accent FROM user_preferences WHERE user_id = %s", (access.user_id,))
             row = cur.fetchone()
             if row:
-                theme = row[0]
+                theme, accent = row[0], row[1]
     return {
         "user_id": access.user_id,
         "username": access.username,
@@ -60,27 +60,36 @@ def me(access: Access = Depends(get_access)):
         "capabilities": sorted(access.caps),
         "org_wide": access.org_wide,
         "teams_in_scope": None if access.org_wide else sorted(access.team_names or []),
-        "preferences": {"theme": theme},
+        "preferences": {"theme": theme, "accent": accent},
     }
 
 
 class PreferencesIn(BaseModel):
-    theme: Literal["night", "day"]
+    theme: Optional[Literal["night", "day"]] = None
+    accent: Optional[Literal["orange", "blue", "emerald", "purple", "rose"]] = None
 
 
 @router.put("/me/preferences")
 def update_preferences(payload: PreferencesIn, access: Access = Depends(get_access)):
     if access.user_id is None:
         raise HTTPException(status_code=400, detail="User id missing in token; please login again")
+    if payload.theme is None and payload.accent is None:
+        raise HTTPException(status_code=400, detail="Nothing to update")
     with transaction() as cur:
         cur.execute(
             """
-            INSERT INTO user_preferences (user_id, theme, updated_at) VALUES (%s, %s, now())
-            ON CONFLICT (user_id) DO UPDATE SET theme = EXCLUDED.theme, updated_at = now()
+            INSERT INTO user_preferences (user_id, theme, accent, updated_at)
+            VALUES (%s, COALESCE(%s, 'night'), COALESCE(%s, 'orange'), now())
+            ON CONFLICT (user_id) DO UPDATE SET
+                theme = COALESCE(%s, user_preferences.theme),
+                accent = COALESCE(%s, user_preferences.accent),
+                updated_at = now()
+            RETURNING theme, accent
             """,
-            (access.user_id, payload.theme),
+            (access.user_id, payload.theme, payload.accent, payload.theme, payload.accent),
         )
-    return {"status": "ok", "preferences": {"theme": payload.theme}}
+        theme, accent = cur.fetchone()
+    return {"status": "ok", "preferences": {"theme": theme, "accent": accent}}
 
 
 # --------------------------------------------------------------- org tree

@@ -54,6 +54,8 @@ import ProductContributionTab from "./components/ProductContributionTab";
 import OrgAdmin from "./v2/OrgAdmin";
 import { useTheme } from "./v2/theme";
 import Sidebar, { APP_VERSION } from "./v2/Sidebar";
+import LoginPage from "./v2/LoginPage";
+import { chartColors } from "./v2/accent";
 import { apiJson } from "./v2/authFetch";
 import { ArrowUpRight, Building2, MapPin } from "lucide-react";
 
@@ -434,7 +436,23 @@ function App() {
   const isScopedManager = userRole === "city_coordinator" || userRole === "dashboard_admin";
   const canViewAllTeams = isAdmin || isSuperUser;
   const canViewDashboards = canViewAllTeams || isScopedManager;
-  const { theme, toggle: toggleTheme } = useTheme();
+  const { theme, toggle: toggleTheme, accent, setAccent } = useTheme();
+  const chart = chartColors(accent, theme);
+  const axisProps = { tick: { fill: chart.tick, fontSize: 12 }, axisLine: false, tickLine: false } as const;
+  const tooltipProps = {
+    contentStyle: {
+      background: chart.tooltipBg,
+      border: `1px solid ${chart.tooltipBorder}`,
+      borderRadius: 14,
+      boxShadow: "0 18px 40px rgba(0,0,0,0.25)",
+      backdropFilter: "blur(10px)",
+      color: chart.tooltipText,
+      padding: "10px 14px",
+    },
+    labelStyle: { color: chart.tooltipText, fontWeight: 700, marginBottom: 4 },
+    itemStyle: { color: chart.tooltipText },
+    cursor: { fill: chart.cursor, stroke: chart.accent, strokeOpacity: 0.25 },
+  } as const;
 
   
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
@@ -468,41 +486,13 @@ const handleLogout = () => {
 
 if (!authUser) {
   return (
-    <div className="page">
-      <div className="container">
-        <div className="card" style={{ maxWidth: 420, margin: "120px auto", padding: 30 }}>
-          <h1>Login</h1>
-
-          <input
-            className="filter-select"
-            placeholder="Username"
-            value={loginForm.username}
-            onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
-          />
-
-          <br /><br />
-
-          <input
-            className="filter-select"
-            placeholder="Password"
-            type="password"
-            value={loginForm.password}
-            onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleLogin();
-            }}
-          />
-
-          <br /><br />
-
-          {loginError && <div className="status error">{loginError}</div>}
-
-          <button className="action-btn primary-btn" onClick={handleLogin}>
-            Login
-          </button>
-        </div>
-      </div>
-    </div>
+    <LoginPage
+      username={loginForm.username}
+      password={loginForm.password}
+      error={loginError}
+      onChange={(field, value) => setLoginForm({ ...loginForm, [field]: value })}
+      onSubmit={handleLogin}
+    />
   );
 }
 
@@ -1794,19 +1784,19 @@ const productSelectionLabel =
                 <AreaChart data={overviewChartData}>
                   <defs>
                     <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#ff6b35" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="#ff6b35" stopOpacity={0.02} />
+                      <stop offset="0%" stopColor={chart.accent} stopOpacity={0.45} />
+                      <stop offset="95%" stopColor={chart.accent} stopOpacity={0.02} />
                     </linearGradient>
                     <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#8b8b94" stopOpacity={0.28} />
-                      <stop offset="95%" stopColor="#8b8b94" stopOpacity={0.02} />
+                      <stop offset="5%" stopColor={chart.muted} stopOpacity={0.28} />
+                      <stop offset="95%" stopColor={chart.muted} stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
 
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="month" />
-                  <YAxis />
-                  <Tooltip />
+                  <CartesianGrid strokeDasharray="4 6" stroke={chart.grid} vertical={false} />
+                  <XAxis dataKey="month" {...axisProps} />
+                  <YAxis {...axisProps} width={48} />
+                  <Tooltip {...tooltipProps} />
                   <Legend />
 
                   {(viewMode === "compare" ||
@@ -1816,8 +1806,11 @@ const productSelectionLabel =
                       type="monotone"
                       dataKey="current"
                       name={String(currentYearLabel)}
-                      stroke="#ff6b35"
+                      stroke={chart.accent}
+                      strokeWidth={3}
                       fill="url(#g1)"
+                      activeDot={{ r: 6, strokeWidth: 3, stroke: chart.tooltipBg, fill: chart.accent }}
+                      animationDuration={1100}
                     />
                   )}
 
@@ -1828,8 +1821,11 @@ const productSelectionLabel =
                       type="monotone"
                       dataKey="previous"
                       name={String(previousYearLabel)}
-                      stroke="#8b8b94"
+                      stroke={chart.muted}
+                      strokeWidth={2}
+                      strokeDasharray="6 5"
                       fill="url(#g2)"
+                      animationDuration={1100}
                     />
                   )}
                 </AreaChart>
@@ -2052,13 +2048,13 @@ const productSelectionLabel =
                 <div className="chart-wrap">
                   <ResponsiveContainer width="100%" height={260}>
                     <LineChart data={focusedClient.monthly_trend}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis />
-                      <Tooltip />
+                      <CartesianGrid strokeDasharray="4 6" stroke={chart.grid} vertical={false} />
+                      <XAxis dataKey="month" {...axisProps} />
+                      <YAxis {...axisProps} width={48} />
+                      <Tooltip {...tooltipProps} />
                       <Legend />
-                      <Line type="monotone" dataKey="previous" name={String(previousYearLabel)} stroke="#8b8b94" strokeWidth={2} />
-                      <Line type="monotone" dataKey="current" name={String(currentYearLabel)} stroke="#ff6b35" strokeWidth={3} />
+                      <Line type="monotone" dataKey="previous" name={String(previousYearLabel)} stroke={chart.muted} strokeWidth={2} strokeDasharray="6 5" dot={false} animationDuration={1000} />
+                      <Line type="monotone" dataKey="current" name={String(currentYearLabel)} stroke={chart.accent} strokeWidth={3} dot={{ r: 3, fill: chart.accent, strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 3, stroke: chart.tooltipBg }} animationDuration={1000} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -2107,15 +2103,22 @@ const productSelectionLabel =
           </div>
           <div className="chart-wrap">
             <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={topFiveProducts}>
-                <CartesianGrid strokeDasharray="3 3" />
+              <BarChart data={topFiveProducts} barCategoryGap="28%">
+                <defs>
+                  <linearGradient id="v2BarGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={chart.accentLight} />
+                    <stop offset="100%" stopColor={chart.accent} stopOpacity={0.55} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="4 6" stroke={chart.grid} vertical={false} />
                 <XAxis dataKey="name" hide />
-                <YAxis />
-                <Tooltip />
+                <YAxis {...axisProps} width={48} />
+                <Tooltip {...tooltipProps} />
                 <Bar
                   dataKey="sales"
-                  radius={[8, 8, 0, 0]}
-                  fill="#ff6b35"
+                  radius={[12, 12, 4, 4]}
+                  fill="url(#v2BarGrad)"
+                  animationDuration={900}
                   onClick={(entry: any) => {
                     const match = data.product_drilldown.find((item) => item.name === entry?.name);
                     if (match) {
@@ -2141,20 +2144,23 @@ const productSelectionLabel =
               <PieChart>
                 <Pie
                   data={concentrationData}
-                  innerRadius={62}
-                  outerRadius={95}
+                  innerRadius={64}
+                  outerRadius={98}
                   paddingAngle={4}
+                  cornerRadius={8}
+                  stroke="none"
+                  animationDuration={1000}
                   dataKey="sales"
                   nameKey="name"
                 >
                   {concentrationData.map((entry, index) => (
                     <Cell
                       key={`${entry.name}-${index}`}
-                      fill={["#ff6b35", "#f5b041", "#4caf6e", "#38bdf8", "#a78bfa"][index % 5]}
+                      fill={chart.series[index % chart.series.length]}
                     />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip {...tooltipProps} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -2276,13 +2282,13 @@ const productSelectionLabel =
               <div className="chart-wrap">
                 <ResponsiveContainer width="100%" height={260}>
                   <LineChart data={selectedProductCard.monthly_trend}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis />
-                    <Tooltip />
+                    <CartesianGrid strokeDasharray="4 6" stroke={chart.grid} vertical={false} />
+                    <XAxis dataKey="month" {...axisProps} />
+                    <YAxis {...axisProps} width={48} />
+                    <Tooltip {...tooltipProps} />
                     <Legend />
-                    <Line type="monotone" dataKey="previous" name={String(previousYearLabel)} stroke="#8b8b94" strokeWidth={2} />
-                    <Line type="monotone" dataKey="current" name={String(currentYearLabel)} stroke="#ff6b35" strokeWidth={3} />
+                    <Line type="monotone" dataKey="previous" name={String(previousYearLabel)} stroke={chart.muted} strokeWidth={2} strokeDasharray="6 5" dot={false} animationDuration={1000} />
+                    <Line type="monotone" dataKey="current" name={String(currentYearLabel)} stroke={chart.accent} strokeWidth={3} dot={{ r: 3, fill: chart.accent, strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 3, stroke: chart.tooltipBg }} animationDuration={1000} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -2558,6 +2564,8 @@ const productSelectionLabel =
         roleLabel={ROLE_LABELS[userRole] || userRole}
         theme={theme}
         onToggleTheme={toggleTheme}
+        accent={accent}
+        onAccent={setAccent}
         onLogout={handleLogout}
       />
 

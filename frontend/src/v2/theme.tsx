@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { apiJson } from "./authFetch";
+import { applyAccent, isAccent, type Accent } from "./accent";
 
 export type Theme = "night" | "day";
 
@@ -12,15 +13,37 @@ function currentUsername(): string {
   }
 }
 
-// Per-user key so two people sharing one browser don't inherit each other's theme.
-const storageKey = (username: string) => `rpl-theme:${username || "_guest"}`;
+// Per-user keys so two people sharing one browser don't inherit each other's look.
+const themeKey = (username: string) => `rpl-theme:${username || "_guest"}`;
+const accentKey = (username: string) => `rpl-accent:${username || "_guest"}`;
+
+// Last look used on this browser: the login screen (no user yet) opens in it.
+const LAST_THEME = "rpl-theme:_last";
+const LAST_ACCENT = "rpl-accent:_last";
 
 function readLocal(username: string): Theme | null {
   try {
-    const v = localStorage.getItem(storageKey(username));
+    const v = localStorage.getItem(username ? themeKey(username) : LAST_THEME);
     return v === "day" || v === "night" ? v : null;
   } catch {
     return null;
+  }
+}
+
+function readLocalAccent(username: string): Accent | null {
+  try {
+    const v = localStorage.getItem(username ? accentKey(username) : LAST_ACCENT);
+    return isAccent(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocal(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* storage blocked: still applies for this session */
   }
 }
 
@@ -37,27 +60,48 @@ export function applyTheme(theme: Theme): void {
   document.documentElement.style.colorScheme = theme === "day" ? "light" : "dark";
 }
 
-/** Apply the stored theme before React renders, to avoid a flash. Explicit choice wins over system. */
+/** Apply the stored theme + accent before React renders, to avoid a flash. */
 export function bootTheme(): void {
-  applyTheme(readLocal(currentUsername()) ?? "night");
+  const u = currentUsername();
+  applyTheme(readLocal(u) ?? "night");
+  applyAccent(readLocalAccent(u) ?? "orange");
+}
+
+function savePrefs(body: { theme?: Theme; accent?: Accent }) {
+  if (!localStorage.getItem("auth_token")) return;
+  apiJson("/api/v2/me/preferences", { method: "PUT", body: JSON.stringify(body) }).catch(() => undefined);
 }
 
 export function useTheme() {
   const username = currentUsername();
   const [theme, setThemeState] = useState<Theme>(() => readLocal(username) ?? "night");
+  const [accent, setAccentState] = useState<Accent>(() => readLocalAccent(username) ?? "orange");
 
-  useEffect(() => applyTheme(theme), [theme]);
+  useEffect(() => {
+    applyTheme(theme);
+    if (username) writeLocal(LAST_THEME, theme);
+  }, [theme, username]);
+  useEffect(() => {
+    applyAccent(accent);
+    if (username) writeLocal(LAST_ACCENT, accent);
+  }, [accent, username]);
 
   // Server profile preference wins when no local explicit choice exists yet (new device).
   useEffect(() => {
     if (!localStorage.getItem("auth_token")) return;
     let cancelled = false;
-    apiJson<{ preferences?: { theme?: Theme } }>("/api/v2/me")
+    apiJson<{ preferences?: { theme?: Theme; accent?: string } }>("/api/v2/me")
       .then((me) => {
+        if (cancelled) return;
         const serverTheme = me?.preferences?.theme;
-        if (!cancelled && serverTheme && !readLocal(username)) {
+        if (serverTheme && !readLocal(username)) {
           setThemeState(serverTheme);
-          localStorage.setItem(storageKey(username), serverTheme);
+          writeLocal(themeKey(username), serverTheme);
+        }
+        const serverAccent = me?.preferences?.accent;
+        if (isAccent(serverAccent) && !readLocalAccent(username)) {
+          setAccentState(serverAccent);
+          writeLocal(accentKey(username), serverAccent);
         }
       })
       .catch(() => undefined);
@@ -69,22 +113,25 @@ export function useTheme() {
   const setTheme = useCallback(
     (next: Theme) => {
       setThemeState(next);
-      try {
-        localStorage.setItem(storageKey(username), next);
-      } catch {
-        /* storage blocked: theme still applies for this session */
-      }
-      if (localStorage.getItem("auth_token")) {
-        apiJson("/api/v2/me/preferences", { method: "PUT", body: JSON.stringify({ theme: next }) }).catch(
-          () => undefined
-        );
-      }
+      writeLocal(themeKey(username), next);
+      writeLocal(LAST_THEME, next);
+      savePrefs({ theme: next });
+    },
+    [username]
+  );
+
+  const setAccent = useCallback(
+    (next: Accent) => {
+      setAccentState(next);
+      writeLocal(accentKey(username), next);
+      writeLocal(LAST_ACCENT, next);
+      savePrefs({ accent: next });
     },
     [username]
   );
 
   const toggle = useCallback(() => setTheme(theme === "night" ? "day" : "night"), [theme, setTheme]);
-  return { theme, setTheme, toggle, systemTheme };
+  return { theme, setTheme, toggle, accent, setAccent, systemTheme };
 }
 
 export function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }) {
