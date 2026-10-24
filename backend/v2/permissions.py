@@ -200,7 +200,8 @@ def resolve_access(user: dict) -> Access:
     if rdef["uses_home_team"] and home_team:
         teams.add(home_team)
 
-    if user_id is not None:
+    # Team members only ever see their own records: extra scopes are ignored for them
+    if user_id is not None and role != "user":
         conn = connect()
         try:
             cur = conn.cursor()

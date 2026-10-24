@@ -1,6 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import jsPDF from "jspdf";
-import "jspdf-autotable";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertCircle,
   BarChart3,
@@ -44,26 +42,42 @@ import {
 } from "recharts";
 import "./App.css";
 import SalesAiInsightsPanel from "./components/SalesAiInsightsPanel";
-import VisitForm from "./components/VisitForm";
-import DataEntry from "./DataEntry";
-import AdminPanel from "./components/AdminPanel";
+const VisitForm = lazy(() => import("./components/VisitForm"));
+const DataEntry = lazy(() => import("./DataEntry"));
+const AdminPanel = lazy(() => import("./components/AdminPanel"));
 import "./sales_ai_insights.css";
-import ForecastTab from "./components/ForecastTab";
-import RessiBot from "./components/RessiBot";
-import ProductContributionTab from "./components/ProductContributionTab";
-import OrgAdmin from "./v2/OrgAdmin";
+const ForecastTab = lazy(() => import("./components/ForecastTab"));
+const RessiBot = lazy(() => import("./components/RessiBot"));
+const ProductContributionTab = lazy(() => import("./components/ProductContributionTab"));
+const OrgAdmin = lazy(() => import("./v2/OrgAdmin"));
+const MultiYear = lazy(() => import("./v2/MultiYear"));
+const VisitPlanner = lazy(() => import("./v2/VisitPlanner"));
+const Customer360 = lazy(() => import("./v2/Customer360"));
 import { useTheme } from "./v2/theme";
 import Sidebar, { APP_VERSION } from "./v2/Sidebar";
 import LoginPage from "./v2/LoginPage";
 import { chartColors } from "./v2/accent";
 import { apiJson } from "./v2/authFetch";
-import { ArrowUpRight, Building2, MapPin } from "lucide-react";
+import { ArrowUpRight, Building2, CalendarClock, Contact, Layers, MapPin } from "lucide-react";
 
 type ClientStatus = "new" | "lost" | "retained";
 type Severity = "high" | "medium" | "low";
 type RecoveryPriority = "high" | "medium" | "low";
 type InsightTone = "positive" | "warning" | "negative" | "neutral";
-type TabKey = "overview" | "clients" | "products" | "team" | "recovery" | "executive" | "visit" | "dataEntry" | "admin" | "forecast" | "productContribution" | "organization";
+// PDF libraries are only downloaded when someone exports a PDF
+const loadPdf = async () => {
+  const mod = await import("jspdf");
+  await import("jspdf-autotable");
+  return { jsPDF: mod.default };
+};
+
+const TabFallback = () => (
+  <div className="card v2-skeleton" aria-busy="true">
+    <div /> <div /> <div />
+  </div>
+);
+
+type TabKey = "overview" | "clients" | "products" | "team" | "recovery" | "executive" | "visit" | "dataEntry" | "admin" | "forecast" | "productContribution" | "organization" | "multiYear" | "planner" | "customers";
 
 type OrgTreeTeam = { id: number; name: string; branch_id: number | null };
 type OrgTreeBranch = { id: number; city_id: number; name: string; code: string; teams: OrgTreeTeam[] };
@@ -82,9 +96,10 @@ const NAV_GROUPS: { key: string; label: string; tabs: TabKey[] }[] = [
   {
     key: "intel",
     label: "Sales Intelligence",
-    tabs: ["overview", "clients", "products", "team", "recovery", "executive", "forecast", "productContribution"],
+    tabs: ["overview", "multiYear", "clients", "products", "team", "recovery", "executive", "forecast", "productContribution"],
   },
-  { key: "field", label: "Field Operations", tabs: ["visit", "dataEntry"] },
+  { key: "field", label: "Field Operations", tabs: ["planner", "visit", "dataEntry"] },
+  { key: "crm", label: "Customers", tabs: ["customers"] },
   { key: "admin", label: "Administration", tabs: ["admin", "organization"] },
 ];
 
@@ -530,6 +545,7 @@ if (!authUser) {
   const [selectedTeam, setSelectedTeam] = useState("");
   const [masterTeams, setMasterTeams] = useState<{ id: number; name: string }[]>([]);
   const [orgCities, setOrgCities] = useState<OrgTreeCity[]>([]);
+  const [customerFocus, setCustomerFocus] = useState("");
   const [selectedCityId, setSelectedCityId] = useState<string>("all");
   const [selectedBranchId, setSelectedBranchId] = useState<string>("all");
   const [productDropdownOpen, setProductDropdownOpen] = useState(false);
@@ -568,12 +584,15 @@ if (!authUser) {
     { key: "forecast", label: "Forecast", icon: <TrendingUp size={16} /> },
     { key: "productContribution", label: "Product Contribution", icon: <BarChart3 size={16} /> },
     { key: "organization", label: "Organization", icon: <Building2 size={16} /> },
+    { key: "multiYear", label: "Multi-Year", icon: <Layers size={16} /> },
+    { key: "planner", label: "Visit Planner", icon: <CalendarClock size={16} /> },
+    { key: "customers", label: "Customer 360", icon: <Contact size={16} /> },
   ];
 
   const visibleTabs = tabs.filter((tab) => {
     if (tab.key === "admin" || tab.key === "organization") return isAdmin;
     if (canViewDashboards) return true;
-    return tab.key === "visit" || tab.key === "dataEntry";
+    return ["visit", "dataEntry", "planner", "customers"].includes(tab.key);
   });
   const visibleGroups = NAV_GROUPS.map((g) => ({
     ...g,
@@ -1467,13 +1486,14 @@ const productSelectionLabel =
     return `Team: ${teamText} | Sales Person: ${salesText} | Month: ${monthText} | Products: ${productText} | View: ${getViewLabel()}`;
   };
 
-  const downloadClientDrilldownPdf = () => {
+  const downloadClientDrilldownPdf = async () => {
     try {
       if (!filteredClientDrilldown.length) {
         alert("PDF ke liye koi client data available nahi hai.");
         return;
       }
 
+      const { jsPDF } = await loadPdf();
       const doc = new jsPDF("l", "mm", "a4");
 
       doc.setFontSize(16);
@@ -1543,13 +1563,14 @@ const productSelectionLabel =
     }
   };
 
-  const downloadProductIntelligencePdf = () => {
+  const downloadProductIntelligencePdf = async () => {
     try {
       if (!filteredProductDrilldown.length) {
         alert("PDF ke liye koi product data available nahi hai.");
         return;
       }
 
+      const { jsPDF } = await loadPdf();
       const doc = new jsPDF("l", "mm", "a4");
 
       doc.setFontSize(16);
@@ -3052,6 +3073,7 @@ const productSelectionLabel =
         </div>
 
         <div className="right-panel" style={{ width: canViewDashboards ? undefined : "100%" }}>
+          <Suspense fallback={<TabFallback />}>
           <div className="tab-content v2-page-enter" key={activeTab}>
             {activeTab === "overview" && renderOverviewTab()}
             {activeTab === "clients" && renderClientsTab()}
@@ -3064,12 +3086,44 @@ const productSelectionLabel =
             {activeTab === "forecast" && <ForecastTab />}
             {activeTab === "productContribution" && <ProductContributionTab />}
             {activeTab === "admin" && isAdmin && <AdminPanel />}
-            {activeTab === "organization" && isAdmin && <OrgAdmin />}            
+            {activeTab === "organization" && isAdmin && <OrgAdmin />}
+            {activeTab === "multiYear" && canViewDashboards && (
+              orgFilterActive && !selectedTeam && visibleTeams.length === 0 ? (
+                <div className="card"><p className="org-muted">Is city/branch mein abhi koi team map nahi hui.</p></div>
+              ) : (
+                <MultiYear
+                  teams={selectedTeam ? [selectedTeam] : orgFilterActive ? visibleTeams.map((t) => t.name) : []}
+                  teamLabel={selectedTeam ? selectedTeam : orgFilterActive ? `${visibleTeams.length} teams (filtered)` : "All teams in your scope"}
+                  salesPerson={selectedSalesPerson}
+                  chart={chart}
+                  tooltipProps={tooltipProps}
+                  axisProps={axisProps}
+                />
+              )
+            )}
+            {activeTab === "planner" && (
+              <VisitPlanner
+                canFilterPeople={userRole !== "user"}
+                onLogVisit={() => setActiveTab("visit")}
+                onOpenCustomer={(name) => {
+                  setCustomerFocus(name);
+                  setActiveTab("customers");
+                }}
+              />
+            )}
+            {activeTab === "customers" && (
+              <Customer360 initialName={customerFocus} chart={chart} tooltipProps={tooltipProps} axisProps={axisProps} />
+            )}
           </div>
+          </Suspense>
         </div>
       </div>
 
-        {(isAdmin || isSuperUser) && <RessiBot apiBaseUrl={API_BASE_URL} />}
+        {(isAdmin || isSuperUser) && (
+          <Suspense fallback={null}>
+            <RessiBot apiBaseUrl={API_BASE_URL} />
+          </Suspense>
+        )}
 
         <div className="footer">
           © {new Date().getFullYear()} Created by Adil Siddiqui — Ressichem Pvt Ltd · RPL Sales v{APP_VERSION}

@@ -287,6 +287,8 @@ export default function OrgAdmin() {
                     <td>
                       {roleDef?.org_wide ? (
                         <span className="org-muted">Entire organization (role)</span>
+                      ) : u.role === "user" ? (
+                        <span className="org-muted">Sirf apna record</span>
                       ) : (
                         <div className="org-scope-list">
                           {u.scopes.length === 0 && <span className="org-muted">None</span>}
@@ -300,7 +302,7 @@ export default function OrgAdmin() {
                       )}
                     </td>
                     <td>
-                      {!roleDef?.org_wide && (
+                      {!roleDef?.org_wide && u.role !== "user" && (
                         <div className="org-form-row" style={{ marginTop: 0 }}>
                           <select className="filter-select" value={d.scope_type} onChange={(e) => setScopeDraft({ ...scopeDraft, [u.id]: { scope_type: e.target.value as Scope["scope_type"], scope_id: "" } })}>
                             <option value="city">City</option>

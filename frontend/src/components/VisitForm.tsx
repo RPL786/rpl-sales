@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import jsPDF from "jspdf";
-import "jspdf-autotable";
 
 const API_BASE_URL = "";
 
@@ -492,7 +490,7 @@ export default function VisitForm() {
       return "Need Follow-up";
     };
 
-    const downloadFollowupPdf = () => {
+    const downloadFollowupPdf = async () => {
       try {
         if (!isAdmin) return;
 
@@ -538,6 +536,8 @@ export default function VisitForm() {
           ];
         });
 
+        const { default: jsPDF } = await import("jspdf");
+        await import("jspdf-autotable");
         const doc = new jsPDF("l", "mm", "a4");
 
         doc.setFontSize(16);

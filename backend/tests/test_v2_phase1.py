@@ -345,3 +345,147 @@ def test_deleting_team_removes_its_scopes(client, admin, org):
     assert client.delete(f"/api/teams/{teams['Temp Team']}", headers=admin).status_code == 200
     scopes = next(u for u in client.get("/api/v2/users", headers=admin).json()["users"] if u["id"] == uid)["scopes"]
     assert scopes == [{"scope_type": "city", "scope_id": org["khi"]}]
+
+
+# ============================================================ Phase 4/5: analytics, customer 360, planner
+from datetime import date as _date, timedelta as _td  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def my_team(client, admin, org):
+    assert client.post("/api/teams", json={"name": "MY Team"}, headers=admin).status_code == 200
+    for d, q in [("2024-02-15", 5), ("2024-06-10", 7), ("2025-02-10", 8), ("2025-06-01", 4),
+                 ("2026-01-10", 3), ("2026-02-14", 6)]:
+        r = client.post("/data/entry", json={"team": "MY Team", "sales_person": "ZAIN", "client_name": "Alpha Builders",
+                                             "product": "TA-200", "entry_date": d, "quantity": q, "amount": q * 100},
+                        headers=admin)
+        assert r.status_code == 200, r.text
+    return "MY Team"
+
+
+def test_multi_year_ytd_is_fair(client, admin, my_team):
+    r = client.get("/api/v2/analytics/multi-year?teams=MY Team&mode=ytd", headers=admin)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["years_available"] == [2024, 2025, 2026]
+    assert body["years"] == [2024, 2025, 2026]
+    assert body["cutoff"]["month"] == "Feb" and body["cutoff"]["day"] == 14
+    totals = {t["year"]: t for t in body["totals"]}
+    assert totals[2024]["value"] == 0      # 15 Feb is after the 14 Feb cutoff
+    assert totals[2025]["value"] == 8
+    assert totals[2026]["value"] == 9
+    assert totals[2026]["growth_pct"] == 12.5
+    assert [m["month"] for m in body["monthly"]] == ["Jan", "Feb"]
+    assert body["salespersons"][0]["name"] == "ZAIN"
+
+
+def test_multi_year_full_and_amount(client, admin, my_team):
+    body = client.get("/api/v2/analytics/multi-year?teams=MY Team&mode=full&metric=amount&years=2025,2026",
+                      headers=admin).json()
+    assert body["years"] == [2025, 2026]
+    totals = {t["year"]: t for t in body["totals"]}
+    assert totals[2025]["value"] == 1200 and totals[2026]["value"] == 900
+    assert totals[2026]["growth_pct"] == -25.0
+    assert len(body["monthly"]) == 12
+
+
+def test_multi_year_scope(client, org, my_team):
+    coord = login(client, "khi_coord", "pass1234")
+    assert client.get("/api/v2/analytics/multi-year?teams=Lahore Team", headers=coord).status_code == 403
+    body = client.get("/api/v2/analytics/multi-year?mode=full", headers=coord).json()
+    names = {s["name"] for s in body["salespersons"]}
+    assert "USMAN" not in names and "ZAIN" not in names
+    member = login(client, "ali", "pass1234")
+    assert client.get("/api/v2/analytics/multi-year", headers=member).status_code == 403
+
+
+def test_customer_360(client, admin, org, my_team):
+    r = client.get("/api/v2/customers/360?name=alpha builders", headers=admin)
+    assert r.status_code == 200, r.text
+    c = r.json()
+    assert [y["year"] for y in c["yearly"]] == [2024, 2025, 2026]
+    assert c["total_qty"] == 33
+    assert c["products"][0]["name"] == "TA-200"
+    assert c["salespersons"][0]["sales_person"] == "ZAIN"
+    assert len(c["monthly_24"]) == 24
+    found = client.get("/api/v2/customers/search?q=alpha", headers=admin).json()["customers"]
+    assert found and found[0]["name"] == "Alpha Builders"
+
+    coord = login(client, "khi_coord", "pass1234")
+    assert client.get("/api/v2/customers/360?name=Lahore Team Client", headers=coord).status_code == 404
+    names = [x["name"] for x in client.get("/api/v2/customers/search?q=client", headers=coord).json()["customers"]]
+    assert "Lahore Team Client" not in names and "Tile Adhesive Client" in names
+
+
+def _visit(client, h, client_name, meeting, nxt="", status="Interested"):
+    r = client.post("/api/visit-entry", headers=h, json={
+        "team": "", "sales_person": "", "client_name": client_name, "client_category": "", "product": "TA-100",
+        "meeting_date": meeting, "meeting_time": "10:00", "meeting_type": "Visit", "meeting_status": status,
+        "client_response": "", "order_amount": 0, "quantity": 0, "future_potential": 0,
+        "next_meeting_date": nxt, "next_meeting_time": "", "notes": ""})
+    assert r.status_code == 200, r.text
+
+
+def test_visit_planner_followups(client, org):
+    ali = login(client, "ali", "pass1234")
+    t = _date.today()
+    iso = lambda n: (t + _td(days=n)).isoformat()  # noqa: E731
+    _visit(client, ali, "Overdue Co", iso(-10), iso(-3))
+    _visit(client, ali, "Done Co", iso(-20), iso(-5))
+    _visit(client, ali, "Done Co", iso(-2))                       # follow-up completed by this later visit
+    _visit(client, ali, "Soon Co", iso(0), iso(3))
+    _visit(client, ali, "Closed Co", iso(-9), iso(-1), status="Order Received")
+
+    p = client.get("/api/v2/visits/planner", headers=ali).json()
+    overdue = [v["client_name"] for v in p["overdue"]]
+    assert overdue == ["Overdue Co"] and p["overdue"][0]["days_overdue"] == 3
+    assert [v["client_name"] for v in p["upcoming"]] == ["Soon Co"]
+    assert p["summary"]["visits_today"] >= 1
+    assert len(p["days"]) == 7
+
+    leader = login(client, "saddam", "pass1234")
+    assert "Overdue Co" in [v["client_name"] for v in client.get("/api/v2/visits/planner", headers=leader).json()["overdue"]]
+    boss = login(client, "boss", "pass1234")
+    assert client.get("/api/v2/visits/planner?sales_person=ali", headers=boss).json()["summary"]["followups_overdue"] == 1
+    other = client.get("/api/v2/visits/planner?sales_person=nobody", headers=boss).json()
+    assert other["summary"]["followups_overdue"] == 0
+
+
+def test_multi_year_mixed_granularity_is_prorated(client, admin, org):
+    assert client.post("/api/teams", json={"name": "Mix Team"}, headers=admin).status_code == 200
+    rows = [("2025-10-01", 310)] + [(f"2026-10-{d:02d}", 10) for d in range(1, 11)]  # 2025 monthly, 2026 daily
+    rows += [("2026-09-15", 1)]
+    for d, q in rows:
+        assert client.post("/data/entry", json={"team": "Mix Team", "sales_person": "Zain ", "client_name": "Mix Co",
+                                                "product": "P1", "entry_date": d, "quantity": q},
+                           headers=admin).status_code == 200
+    assert client.post("/data/entry", json={"team": "Mix Team", "sales_person": "ZAIN", "client_name": "Mix Co",
+                                            "product": "P1", "entry_date": "2026-10-02", "quantity": 5},
+                       headers=admin).status_code == 200
+    body = client.get("/api/v2/analytics/multi-year?teams=Mix Team&mode=ytd", headers=admin).json()
+    assert body["cutoff"]["day"] == 10 and body["prorated_years"] == [2025]
+    totals = {t["year"]: t["value"] for t in body["totals"]}
+    assert totals[2025] == 100.0           # 310 * 10/31
+    assert totals[2026] == 106.0           # 100 daily + 5 + 1 (Sep)
+    names = [r["name"] for r in body["salespersons"]]
+    assert len(names) == 1                  # "Zain " and "ZAIN" are one person
+    assert body["salespersons"][0]["values"]["2026"] == 106.0
+
+
+def test_member_scope_cannot_be_widened(client, admin, org):
+    uid = org["users"]["ali"]
+    r = client.put(f"/api/v2/users/{uid}/scopes", json={"scopes": [{"scope_type": "org"}]}, headers=admin)
+    assert r.status_code == 400
+
+
+def test_customer_search_escapes_wildcards(client, admin, org):
+    assert client.get("/api/v2/customers/search?q=%25%25", headers=admin).json()["customers"] == []
+
+
+def test_customer_360_visits_only_prospect(client, admin, org):
+    r = client.get("/api/v2/customers/360?name=Overdue Co", headers=admin)
+    assert r.status_code == 200, r.text
+    c = r.json()
+    assert c["status"] == "prospect" and c["visit_count"] == 1 and len(c["visits"]) == 1
+    soon = client.get("/api/v2/customers/360?name=Soon Co", headers=admin).json()
+    assert soon["next_followup"] == (_date.today() + _td(days=3)).isoformat()

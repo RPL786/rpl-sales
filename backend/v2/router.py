@@ -365,10 +365,13 @@ def set_user_scopes(user_id: int, payload: ScopesIn, access: Access = Depends(re
             clean.append(key)
 
     with transaction() as cur:
-        cur.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+        cur.execute("SELECT username, role FROM users WHERE id = %s", (user_id,))
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="User not found")
+        if row[1] == "user" and clean:
+            raise HTTPException(status_code=400,
+                                detail="Team Members only see their own records; change the role to give wider scope")
         for st, sid in clean:
             if st != "org":
                 cur.execute(f"SELECT 1 FROM {_SCOPE_TABLE[st]} WHERE id = %s", (sid,))

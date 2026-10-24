@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Mic, Send, Volume2, X } from "lucide-react";
-import ressiBotCar from "../assets/ressibot-car.png";
+import ressiBotCar from "../assets/ressibot-car.webp";
 
 type ChatMessage = {
   role: "bot" | "user";
