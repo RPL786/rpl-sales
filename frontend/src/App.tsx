@@ -52,9 +52,10 @@ import ForecastTab from "./components/ForecastTab";
 import RessiBot from "./components/RessiBot";
 import ProductContributionTab from "./components/ProductContributionTab";
 import OrgAdmin from "./v2/OrgAdmin";
-import { ThemeToggle, useTheme } from "./v2/theme";
+import { useTheme } from "./v2/theme";
+import Sidebar, { APP_VERSION } from "./v2/Sidebar";
 import { apiJson } from "./v2/authFetch";
-import { Building2, ClipboardList, LineChart as LineChartIcon, MapPin, Settings2 } from "lucide-react";
+import { ArrowUpRight, Building2, MapPin } from "lucide-react";
 
 type ClientStatus = "new" | "lost" | "retained";
 type Severity = "high" | "medium" | "low";
@@ -588,9 +589,8 @@ if (!authUser) {
     ...g,
     items: visibleTabs.filter((t) => g.tabs.includes(t.key)),
   })).filter((g) => g.items.length > 0);
-  const activeGroup = visibleGroups.find((g) => g.tabs.includes(activeTab as TabKey)) ?? visibleGroups[0];
-  const groupIcon = (key: string) =>
-    key === "intel" ? <LineChartIcon size={15} /> : key === "field" ? <ClipboardList size={15} /> : <Settings2 size={15} />;
+  const activeTabLabel =
+    activeTab === "overview" ? "Sales Overview" : tabs.find((t) => t.key === activeTab)?.label ?? "Dashboard";
 
   // City > Branch filter narrows the Team list (scope is enforced by the backend as well)
   const branchOptions = orgCities
@@ -1665,6 +1665,10 @@ const productSelectionLabel =
       <>
         <div className="metrics-grid">
           <div className="card metric-card">
+              <div className="v2-kpi-head">
+                <span className="v2-kpi-icon tone-1"><Package /></span>
+                <span className="v2-kpi-arrow"><ArrowUpRight /></span>
+              </div>
             <p className="metric-title">
               {viewMode === "previous_year" || viewMode === "previous_month"
                 ? `${previousYearLabel} Bags`
@@ -1675,6 +1679,10 @@ const productSelectionLabel =
           </div>
 
           <div className="card metric-card">
+              <div className="v2-kpi-head">
+                <span className="v2-kpi-icon tone-4"><CalendarRange /></span>
+                <span className="v2-kpi-arrow"><ArrowUpRight /></span>
+              </div>
             <p className="metric-title">
               {viewMode === "compare"
                 ? `${previousYearLabel} Same Period`
@@ -1691,6 +1699,10 @@ const productSelectionLabel =
           </div>
 
           <div className="card metric-card">
+              <div className="v2-kpi-head">
+                <span className="v2-kpi-icon tone-2"><TrendingUp /></span>
+                <span className="v2-kpi-arrow"><ArrowUpRight /></span>
+              </div>
             <p className="metric-title">Growth</p>
             <h3 className="metric-value">
               {formatMeaningfulGrowth(
@@ -1706,6 +1718,10 @@ const productSelectionLabel =
           </div>
 
           <div className="card metric-card">
+              <div className="v2-kpi-head">
+                <span className="v2-kpi-icon tone-3"><Users /></span>
+                <span className="v2-kpi-arrow"><ArrowUpRight /></span>
+              </div>
             <p className="metric-title">Retained Clients</p>
             <h3 className="metric-value">
               {formatNumber(scopedClientSummary.retained)} Clients
@@ -1716,6 +1732,10 @@ const productSelectionLabel =
           </div>
 
           <div className="card metric-card">
+              <div className="v2-kpi-head">
+                <span className="v2-kpi-icon tone-1"><Sparkles /></span>
+                <span className="v2-kpi-arrow"><ArrowUpRight /></span>
+              </div>
             <p className="metric-title">Top Product</p>
             <h3 className="metric-value metric-value-sm">
               {scopedTopProduct && scopedTopProduct.toLowerCase() !== "nan" ? scopedTopProduct : "N/A"}
@@ -1725,6 +1745,10 @@ const productSelectionLabel =
 
           {!isSuperUser ? (
             <div className="card metric-card">
+              <div className="v2-kpi-head">
+                <span className="v2-kpi-icon tone-2"><Briefcase /></span>
+                <span className="v2-kpi-arrow"><ArrowUpRight /></span>
+              </div>
               <p className="metric-title">Top Sales Person</p>
               <h3 className="metric-value metric-value-sm">
                 {selectedSalesPerson === "all"
@@ -1770,12 +1794,12 @@ const productSelectionLabel =
                 <AreaChart data={overviewChartData}>
                   <defs>
                     <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0.02} />
+                      <stop offset="5%" stopColor="#ff6b35" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="#ff6b35" stopOpacity={0.02} />
                     </linearGradient>
                     <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#94a3b8" stopOpacity={0.28} />
-                      <stop offset="95%" stopColor="#94a3b8" stopOpacity={0.02} />
+                      <stop offset="5%" stopColor="#8b8b94" stopOpacity={0.28} />
+                      <stop offset="95%" stopColor="#8b8b94" stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
 
@@ -1792,7 +1816,7 @@ const productSelectionLabel =
                       type="monotone"
                       dataKey="current"
                       name={String(currentYearLabel)}
-                      stroke="#6366f1"
+                      stroke="#ff6b35"
                       fill="url(#g1)"
                     />
                   )}
@@ -1804,7 +1828,7 @@ const productSelectionLabel =
                       type="monotone"
                       dataKey="previous"
                       name={String(previousYearLabel)}
-                      stroke="#94a3b8"
+                      stroke="#8b8b94"
                       fill="url(#g2)"
                     />
                   )}
@@ -2033,8 +2057,8 @@ const productSelectionLabel =
                       <YAxis />
                       <Tooltip />
                       <Legend />
-                      <Line type="monotone" dataKey="previous" name={String(previousYearLabel)} stroke="#94a3b8" strokeWidth={2} />
-                      <Line type="monotone" dataKey="current" name={String(currentYearLabel)} stroke="#10b981" strokeWidth={3} />
+                      <Line type="monotone" dataKey="previous" name={String(previousYearLabel)} stroke="#8b8b94" strokeWidth={2} />
+                      <Line type="monotone" dataKey="current" name={String(currentYearLabel)} stroke="#ff6b35" strokeWidth={3} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -2091,7 +2115,7 @@ const productSelectionLabel =
                 <Bar
                   dataKey="sales"
                   radius={[8, 8, 0, 0]}
-                  fill="#4f46e5"
+                  fill="#ff6b35"
                   onClick={(entry: any) => {
                     const match = data.product_drilldown.find((item) => item.name === entry?.name);
                     if (match) {
@@ -2126,7 +2150,7 @@ const productSelectionLabel =
                   {concentrationData.map((entry, index) => (
                     <Cell
                       key={`${entry.name}-${index}`}
-                      fill={["#4f46e5", "#7c3aed", "#0ea5e9", "#10b981", "#f59e0b"][index % 5]}
+                      fill={["#ff6b35", "#f5b041", "#4caf6e", "#38bdf8", "#a78bfa"][index % 5]}
                     />
                   ))}
                 </Pie>
@@ -2257,8 +2281,8 @@ const productSelectionLabel =
                     <YAxis />
                     <Tooltip />
                     <Legend />
-                    <Line type="monotone" dataKey="previous" name={String(previousYearLabel)} stroke="#94a3b8" strokeWidth={2} />
-                    <Line type="monotone" dataKey="current" name={String(currentYearLabel)} stroke="#4f46e5" strokeWidth={3} />
+                    <Line type="monotone" dataKey="previous" name={String(previousYearLabel)} stroke="#8b8b94" strokeWidth={2} />
+                    <Line type="monotone" dataKey="current" name={String(currentYearLabel)} stroke="#ff6b35" strokeWidth={3} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -2521,10 +2545,21 @@ const productSelectionLabel =
   );
 
   return (
-    <div className="page">
+    <div className="page v2-shell">
       <div className="dashboard-bg-orb dashboard-bg-orb-1" />
       <div className="dashboard-bg-orb dashboard-bg-orb-2" />
       <div className="dashboard-grid-overlay" />
+
+      <Sidebar
+        groups={visibleGroups.map((g) => ({ key: g.key, label: g.label, items: g.items }))}
+        activeKey={activeTab}
+        onSelect={(key) => setActiveTab(key as TabKey)}
+        username={authUser.username}
+        roleLabel={ROLE_LABELS[userRole] || userRole}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onLogout={handleLogout}
+      />
 
       <div className="container">
         <div className="hero-card">
@@ -2533,8 +2568,8 @@ const productSelectionLabel =
               <div className="logo-top-wrap">
                 <img src="/logo.png" alt="Company Logo" className="company-logo-top" />
               </div>
-              <p className="eyebrow">Sales Review Application</p>
-              <h1>Executive Dashboard</h1>
+              <p className="eyebrow">RPL Sales · Version {APP_VERSION}</p>
+              <h1>{activeTabLabel}</h1>
               <p className="subtext">
                 Sales Command Center — city, branch, team aur salesperson performance ek hi workspace mein.
               </p>
@@ -2664,13 +2699,6 @@ const productSelectionLabel =
                   {uploading ? "Uploading DB..." : "Upload DB Excel"}
                 </button>
               )}
-              <span className="v2-role-chip" title="Your role">
-                <Shield size={13} /> {ROLE_LABELS[userRole] || userRole}
-              </span>
-              <ThemeToggle theme={theme} onToggle={toggleTheme} />
-              <button className="action-btn" onClick={handleLogout}>
-                Logout ({authUser.username})
-              </button>
             </div>
           </div>
 
@@ -2702,36 +2730,6 @@ const productSelectionLabel =
               </div>
             </div>
 
-            <nav className="v2-nav" aria-label="Main navigation">
-              {visibleGroups.length > 1 && (
-                <div className="v2-nav-groups">
-                  {visibleGroups.map((g) => (
-                    <button
-                      key={g.key}
-                      className={`v2-nav-group ${activeGroup?.key === g.key ? "active" : ""}`}
-                      onClick={() => {
-                        if (!g.tabs.includes(activeTab as TabKey)) setActiveTab(g.items[0].key);
-                      }}
-                    >
-                      {groupIcon(g.key)}
-                      <span>{g.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="tabs-shell hero-tabs-inline v2-nav-tabs">
-                {(activeGroup?.items ?? []).map((tab) => (
-                  <button
-                    key={tab.key}
-                    className={`tab-btn ${activeTab === tab.key ? "active" : ""}`}
-                    onClick={() => setActiveTab(tab.key)}
-                  >
-                    {tab.icon}
-                    <span>{tab.label}</span>
-                  </button>
-                ))}
-              </div>
-            </nav>
           </div>
         </div>
        
@@ -3046,7 +3044,7 @@ const productSelectionLabel =
         </div>
 
         <div className="right-panel" style={{ width: canViewDashboards ? undefined : "100%" }}>
-          <div className="tab-content">
+          <div className="tab-content v2-page-enter" key={activeTab}>
             {activeTab === "overview" && renderOverviewTab()}
             {activeTab === "clients" && renderClientsTab()}
             {activeTab === "products" && renderProductsTab()}
@@ -3066,7 +3064,7 @@ const productSelectionLabel =
         {(isAdmin || isSuperUser) && <RessiBot apiBaseUrl={API_BASE_URL} />}
 
         <div className="footer">
-          © {new Date().getFullYear()} Created by Adil Siddiqui — Ressichem Pvt Ltd
+          © {new Date().getFullYear()} Created by Adil Siddiqui — Ressichem Pvt Ltd · RPL Sales v{APP_VERSION}
         </div>
       </div>
     </div>
