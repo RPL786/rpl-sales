@@ -68,6 +68,8 @@ from v2.permissions import (
 from v2 import audit as v2_audit
 
 app.include_router(v2_router)
+from v2.analytics import router as v2_analytics_router
+app.include_router(v2_analytics_router)
 
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
