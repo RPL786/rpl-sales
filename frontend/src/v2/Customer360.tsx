@@ -94,7 +94,10 @@ export default function Customer360({ initialName, chart, tooltipProps, axisProp
   }, [q, selected]);
 
   useEffect(() => {
-    if (!selected) return;
+    if (!selected) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError("");
@@ -109,6 +112,7 @@ export default function Customer360({ initialName, chart, tooltipProps, axisProp
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
+      setLoading(false);
     };
   }, [selected]);
 

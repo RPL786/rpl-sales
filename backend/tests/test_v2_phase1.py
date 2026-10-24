@@ -449,3 +449,43 @@ def test_visit_planner_followups(client, org):
     assert client.get("/api/v2/visits/planner?sales_person=ali", headers=boss).json()["summary"]["followups_overdue"] == 1
     other = client.get("/api/v2/visits/planner?sales_person=nobody", headers=boss).json()
     assert other["summary"]["followups_overdue"] == 0
+
+
+def test_multi_year_mixed_granularity_is_prorated(client, admin, org):
+    assert client.post("/api/teams", json={"name": "Mix Team"}, headers=admin).status_code == 200
+    rows = [("2025-10-01", 310)] + [(f"2026-10-{d:02d}", 10) for d in range(1, 11)]  # 2025 monthly, 2026 daily
+    rows += [("2026-09-15", 1)]
+    for d, q in rows:
+        assert client.post("/data/entry", json={"team": "Mix Team", "sales_person": "Zain ", "client_name": "Mix Co",
+                                                "product": "P1", "entry_date": d, "quantity": q},
+                           headers=admin).status_code == 200
+    assert client.post("/data/entry", json={"team": "Mix Team", "sales_person": "ZAIN", "client_name": "Mix Co",
+                                            "product": "P1", "entry_date": "2026-10-02", "quantity": 5},
+                       headers=admin).status_code == 200
+    body = client.get("/api/v2/analytics/multi-year?teams=Mix Team&mode=ytd", headers=admin).json()
+    assert body["cutoff"]["day"] == 10 and body["prorated_years"] == [2025]
+    totals = {t["year"]: t["value"] for t in body["totals"]}
+    assert totals[2025] == 100.0           # 310 * 10/31
+    assert totals[2026] == 106.0           # 100 daily + 5 + 1 (Sep)
+    names = [r["name"] for r in body["salespersons"]]
+    assert len(names) == 1                  # "Zain " and "ZAIN" are one person
+    assert body["salespersons"][0]["values"]["2026"] == 106.0
+
+
+def test_member_scope_cannot_be_widened(client, admin, org):
+    uid = org["users"]["ali"]
+    r = client.put(f"/api/v2/users/{uid}/scopes", json={"scopes": [{"scope_type": "org"}]}, headers=admin)
+    assert r.status_code == 400
+
+
+def test_customer_search_escapes_wildcards(client, admin, org):
+    assert client.get("/api/v2/customers/search?q=%25%25", headers=admin).json()["customers"] == []
+
+
+def test_customer_360_visits_only_prospect(client, admin, org):
+    r = client.get("/api/v2/customers/360?name=Overdue Co", headers=admin)
+    assert r.status_code == 200, r.text
+    c = r.json()
+    assert c["status"] == "prospect" and c["visit_count"] == 1 and len(c["visits"]) == 1
+    soon = client.get("/api/v2/customers/360?name=Soon Co", headers=admin).json()
+    assert soon["next_followup"] == (_date.today() + _td(days=3)).isoformat()

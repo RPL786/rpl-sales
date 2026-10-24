@@ -34,6 +34,7 @@ type Resp = {
   mode: "ytd" | "full";
   cutoff: { year: number; month: string; day: number | null; label: string } | null;
   latest_year_partial: boolean;
+  prorated_years: number[];
   monthly: Record<string, number | string>[];
   totals: Total[];
   salespersons: Row[];
@@ -73,6 +74,11 @@ export default function MultiYear({ teams, teamLabel, salesPerson, chart, toolti
   const [loading, setLoading] = useState(true);
 
   const teamsKey = teams.join(",");
+  // a different team / salesperson may have different years: start again from its latest 3
+  useEffect(() => {
+    setYears([]);
+  }, [teamsKey, salesPerson]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -172,7 +178,11 @@ export default function MultiYear({ teams, teamLabel, salesPerson, chart, toolti
           <div className="info-banner" style={{ marginTop: 12 }}>
             <Info size={15} />
             {mode === "ytd"
-              ? `Fair comparison: har saal sirf ${data.cutoff.label} ka data compare ho raha hai (${data.cutoff.year} ka data yahan tak hai).`
+              ? `Fair comparison: har saal sirf ${data.cutoff.label} ka data compare ho raha hai (${data.cutoff.year} ka data yahan tak hai).${
+                  data.prorated_years.length
+                    ? ` ${data.prorated_years.join(", ")} ka ${data.cutoff.month} mahana upload tha, us ka hissa din ke hisaab se liya gaya.`
+                    : ""
+                }`
               : data.latest_year_partial
               ? `Note: ${data.cutoff.year} abhi poora nahi hua (data ${data.cutoff.label} tak). Barabar muqabla ke liye "Same period (YTD)" chunein.`
               : "Poore saal ka muqabla."}

@@ -6,8 +6,9 @@ existing V1 tables (sales_entries, visit_entries, clients).
 from __future__ import annotations
 
 import calendar
+import os
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,6 +17,22 @@ from .db import transaction
 from .permissions import VIEW_REPORTS, Access, assert_team_allowed, get_access, require_cap
 
 router = APIRouter(prefix="/api/v2", tags=["v2-analytics"])
+
+def _today() -> date:
+    """'Today' in the business timezone (default Asia/Karachi), not the server's clock zone."""
+    tz_name = os.getenv("APP_TIMEZONE", "Asia/Karachi")
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo(tz_name)).date()
+    except Exception:  # tzdata missing in slim images: Pakistan is UTC+5 all year
+        return datetime.now(timezone(timedelta(hours=5))).date()
+
+
+def _like(q: str) -> str:
+    escaped = q.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 _MONTH_ARRAY = "ARRAY['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']"
@@ -45,12 +62,16 @@ def _team_filter(access: Access, teams_param: str) -> Tuple[Optional[List[str]],
     return sorted(access.team_names or []), False
 
 
-def _where(teams: Optional[List[str]], salesperson: str = "", client: str = "") -> Tuple[str, list]:
+def _where(teams: Optional[List[str]], salesperson: str = "", client: str = "",
+           exact_person: bool = False) -> Tuple[str, list]:
     clauses, params = [], []
     if teams is not None:
         clauses.append("LOWER(TRIM(s.team)) = ANY(%s)")
         params.append([t.strip().lower() for t in teams])
-    if salesperson:
+    if salesperson and exact_person:
+        clauses.append("s.sales_person = %s")  # same rule as V1 /data/entries for team members
+        params.append(salesperson)
+    elif salesperson:
         clauses.append("LOWER(TRIM(s.sales_person)) = LOWER(TRIM(%s))")
         params.append(salesperson)
     if client:
@@ -80,13 +101,15 @@ def multi_year(
     where, params = _where(team_list, salesperson.strip())
     col = "qty" if metric == "qty" else "amt"
     top = max(1, min(int(top), 50))
+    empty = {"years_available": [], "years": [], "metric": metric, "mode": mode, "cutoff": None,
+             "monthly": [], "totals": [], "salespersons": [], "products": [], "latest_year_partial": False,
+             "prorated_years": []}
 
     with transaction() as cur:
         cur.execute(f"WITH b AS ({_BASE} {where}) SELECT DISTINCT y FROM b WHERE y IS NOT NULL ORDER BY y", params)
         available = [int(r[0]) for r in cur.fetchall()]
         if not available:
-            return {"years_available": [], "years": [], "metric": metric, "mode": mode, "cutoff": None,
-                    "monthly": [], "totals": [], "salespersons": [], "products": [], "latest_year_partial": False}
+            return empty
 
         latest = available[-1]
         cur.execute(
@@ -94,29 +117,57 @@ def multi_year(
             params + [latest],
         )
         cut_m = int(cur.fetchone()[0] or 12)
+        # Granularity per year in the cutoff month: monthly uploads store every row on day 1
         cur.execute(
-            f"WITH b AS ({_BASE} {where}) SELECT MAX(d) FROM b WHERE y = %s AND m = %s",
-            params + [latest, cut_m],
+            f"""WITH b AS ({_BASE} {where})
+                SELECT y, MAX(d) FROM b WHERE m = %s AND y IS NOT NULL GROUP BY y""",
+            params + [cut_m],
         )
-        cut_d = int(cur.fetchone()[0] or 1)
+        max_day_in_cut = {int(y): int(d or 1) for y, d in cur.fetchall()}
+        cur.execute(
+            f"WITH b AS ({_BASE} {where}) SELECT MAX(d) FROM b WHERE y = %s",
+            params + [latest],
+        )
+        latest_has_daily = int(cur.fetchone()[0] or 1) > 1
+        cut_d = max_day_in_cut.get(latest, 1)
+        days_in_cut_month = calendar.monthrange(latest, cut_m)[1]
+        latest_monthly_in_cut = cut_d == 1 and not latest_has_daily
+        month_complete = latest_monthly_in_cut or cut_d >= days_in_cut_month
+
+        # Years whose cutoff-month data is monthly (day 1 only): pro-rate that month for a fair YTD
+        if month_complete:
+            frac, cut_day_sql, prorated = 1.0, 31, []
+        else:
+            frac = round(cut_d / days_in_cut_month, 6)
+            cut_day_sql = cut_d
+            prorated = sorted(y for y, md in max_day_in_cut.items() if md == 1 and y != latest)
+
+        def ytd_val(c: str):
+            return (f"(CASE WHEN m < %s THEN {c} "
+                    f"WHEN m = %s AND y = ANY(%s) THEN {c} * %s "
+                    f"WHEN m = %s AND d <= %s THEN {c} ELSE 0 END)",
+                    [cut_m, cut_m, prorated, frac, cut_m, cut_day_sql])
+
+        ytd_in = "(m < %s OR (m = %s AND (y = ANY(%s) OR d <= %s)))"
+        ytd_in_params = [cut_m, cut_m, prorated, cut_day_sql]
+
+        if mode == "ytd":
+            val_sql, val_params = ytd_val(col)
+            in_sql, in_params = ytd_in, ytd_in_params
+        else:
+            val_sql, val_params = col, []
+            in_sql, in_params = "TRUE", []
 
         requested = sorted({int(y) for y in years.split(",") if y.strip().isdigit()})
         selected = [y for y in requested if y in available] or available[-3:]
 
-        days_in_cut_month = calendar.monthrange(latest, cut_m)[1]
-        month_complete = cut_d >= days_in_cut_month or cut_d == 1  # day 1 = monthly upload (whole month)
-        ytd_cond = "(m < %s OR (m = %s AND d <= %s))"
-        ytd_params = [cut_m, cut_m, cut_d if not month_complete else 31]
-        period_cond = ytd_cond if mode == "ytd" else "TRUE"
-        period_params = ytd_params if mode == "ytd" else []
-
-        # monthly series
+        # monthly series (CTE params, then SELECT params, then WHERE params)
         cur.execute(
             f"""WITH b AS ({_BASE} {where})
-                SELECT y, m, SUM({col}) FROM b
-                WHERE y = ANY(%s) AND m IS NOT NULL AND {period_cond}
+                SELECT y, m, SUM({val_sql}) FROM b
+                WHERE y = ANY(%s) AND m IS NOT NULL AND {in_sql}
                 GROUP BY y, m""",
-            params + [selected] + period_params,
+            params + val_params + [selected] + in_params,
         )
         monthly_map: Dict[int, Dict[str, float]] = defaultdict(dict)
         for y, m, v in cur.fetchall():
@@ -127,21 +178,20 @@ def multi_year(
             for m in range(1, last_month + 1)
         ]
 
-        # totals per year (full + ytd) for all available years (growth needs previous year)
+        # totals per year: full and fair-YTD for every year (growth needs the previous year)
+        ytd_sql, ytd_params = ytd_val(col)
         cur.execute(
             f"""WITH b AS ({_BASE} {where})
-                SELECT y, SUM({col}), SUM(CASE WHEN {ytd_cond} THEN {col} ELSE 0 END)
-                FROM b WHERE y IS NOT NULL GROUP BY y ORDER BY y""",
+                SELECT y, SUM({col}), SUM({ytd_sql}) FROM b WHERE y IS NOT NULL GROUP BY y ORDER BY y""",
             params + ytd_params,
         )
         tot = {int(y): (float(f or 0), float(t or 0)) for y, f, t in cur.fetchall()}
 
-        # clients per year within the chosen period
         cur.execute(
             f"""WITH b AS ({_BASE} {where})
                 SELECT DISTINCT y, LOWER(TRIM(client_name)) FROM b
-                WHERE y IS NOT NULL AND client_name IS NOT NULL AND {period_cond}""",
-            params + period_params,
+                WHERE y IS NOT NULL AND client_name IS NOT NULL AND TRIM(client_name) <> '' AND {in_sql}""",
+            params + in_params,
         )
         clients: Dict[int, set] = defaultdict(set)
         for y, c in cur.fetchall():
@@ -166,24 +216,28 @@ def multi_year(
             })
 
         def breakdown(field: str):
+            # group on the trimmed, case-folded name so "ZAIN" and "zain " add up instead of colliding
             cur.execute(
                 f"""WITH b AS ({_BASE} {where})
-                    SELECT {field}, y, SUM({col}) FROM b
-                    WHERE y = ANY(%s) AND {field} IS NOT NULL AND TRIM({field}) <> '' AND {period_cond}
-                    GROUP BY {field}, y""",
-                params + [selected] + period_params,
+                    SELECT MIN(TRIM({field})), y, SUM({val_sql}) FROM b
+                    WHERE y = ANY(%s) AND {field} IS NOT NULL AND TRIM({field}) <> '' AND {in_sql}
+                    GROUP BY LOWER(TRIM({field})), y""",
+                params + val_params + [selected] + in_params,
             )
-            data: Dict[str, Dict[str, float]] = defaultdict(dict)
+            data: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+            display: Dict[str, str] = {}
             for name, y, v in cur.fetchall():
-                data[str(name).strip()][str(y)] = round(float(v or 0), 2)
+                key = str(name).strip().lower()
+                display.setdefault(key, str(name).strip())
+                data[key][str(y)] += float(v or 0)
             last, prev_y = str(selected[-1]), str(selected[-2]) if len(selected) > 1 else None
             rows = []
-            for name, vals in data.items():
-                if name.lower() in {"nan", "none"}:
+            for key, vals in data.items():
+                if key in {"nan", "none"}:
                     continue
                 rows.append({
-                    "name": name,
-                    "values": {str(y): vals.get(str(y), 0) for y in selected},
+                    "name": display[key],
+                    "values": {str(y): round(vals.get(str(y), 0), 2) for y in selected},
                     "growth_pct": _growth(vals.get(last, 0), vals.get(prev_y) if prev_y else None),
                 })
             rows.sort(key=lambda r: (r["values"].get(last, 0), sum(r["values"].values())), reverse=True)
@@ -192,18 +246,16 @@ def multi_year(
         salespersons = breakdown("sales_person")
         products = breakdown("product")
 
+    label = f"Jan – {MONTHS[cut_m - 1]}" if month_complete else f"1 Jan – {cut_d} {MONTHS[cut_m - 1]}"
     return {
         "years_available": available,
         "years": selected,
         "metric": metric,
         "mode": mode,
-        "cutoff": {
-            "year": latest,
-            "month": MONTHS[cut_m - 1],
-            "day": None if month_complete else cut_d,
-            "label": f"Jan – {MONTHS[cut_m - 1]}" if month_complete else f"1 Jan – {cut_d} {MONTHS[cut_m - 1]}",
-        },
+        "cutoff": {"year": latest, "month": MONTHS[cut_m - 1], "day": None if month_complete else cut_d,
+                   "label": label},
         "latest_year_partial": not (cut_m == 12 and month_complete),
+        "prorated_years": prorated if mode == "ytd" else [],
         "monthly": monthly,
         "totals": totals,
         "salespersons": salespersons,
@@ -219,24 +271,24 @@ def customer_search(q: str = "", limit: int = 20, access: Access = Depends(get_a
         return {"customers": []}
     team_list, _ = _team_filter(access, "")
     if access.role == "user":  # team members: only their own customers
-        where, params = _where(team_list, salesperson=access.username)
+        where, params = _where(team_list, salesperson=access.username, exact_person=True)
     else:
         where, params = _where(team_list)
-    like = f"%{q.lower()}%"
+    like = _like(q)
     limit = max(1, min(int(limit), 50))
     with transaction() as cur:
         cur.execute(
             f"""
-            SELECT name, MAX(last_date), SUM(total), MAX(src) FROM (
+            SELECT MIN(name), MAX(last_date), SUM(total), MAX(src) FROM (
                 SELECT TRIM(s.client_name) AS name, MAX(s.entry_date) AS last_date, SUM(COALESCE(s.quantity,0)) AS total, 1 AS src
-                FROM sales_entries s {where} {"AND" if where else "WHERE"} LOWER(s.client_name) LIKE %s
+                FROM sales_entries s {where} {"AND" if where else "WHERE"} LOWER(s.client_name) LIKE %s ESCAPE '\\'
                 GROUP BY TRIM(s.client_name)
                 UNION ALL
                 SELECT TRIM(v.client_name), MAX(v.meeting_date), 0, 0
                 FROM visit_entries v
-                WHERE LOWER(v.client_name) LIKE %s {_visit_scope_sql(access)}
+                WHERE LOWER(v.client_name) LIKE %s ESCAPE '\\' {_visit_scope_sql(access)}
                 GROUP BY TRIM(v.client_name)
-            ) x GROUP BY name ORDER BY MAX(src) DESC, SUM(total) DESC, name LIMIT %s
+            ) x GROUP BY LOWER(name) ORDER BY MAX(src) DESC, SUM(total) DESC, MIN(name) LIMIT %s
             """,
             params + [like, like] + _visit_scope_params(access) + [limit],
         )
@@ -248,18 +300,19 @@ def customer_search(q: str = "", limit: int = 20, access: Access = Depends(get_a
 
 
 def _visit_scope_sql(access: Access, alias: str = "v") -> str:
+    # members first: same exact rule as V1 /api/visit-entries, whatever scopes exist
+    if access.role == "user":
+        return f" AND ({alias}.created_by = %s OR {alias}.sales_person = %s)"
     if access.org_wide:
         return ""
-    if access.role == "user":
-        return f" AND (LOWER({alias}.created_by) = LOWER(%s) OR LOWER({alias}.sales_person) = LOWER(%s))"
     return f" AND LOWER(TRIM({alias}.team)) = ANY(%s)"
 
 
 def _visit_scope_params(access: Access) -> list:
-    if access.org_wide:
-        return []
     if access.role == "user":
         return [access.username, access.username]
+    if access.org_wide:
+        return []
     return [[t.strip().lower() for t in (access.team_names or [])]]
 
 
@@ -270,7 +323,7 @@ def customer_360(name: str, access: Access = Depends(get_access)):
         raise HTTPException(status_code=400, detail="Customer name required")
     team_list, _ = _team_filter(access, "")
     if access.role == "user":
-        where, params = _where(team_list, salesperson=access.username, client=name)
+        where, params = _where(team_list, salesperson=access.username, client=name, exact_person=True)
     else:
         where, params = _where(team_list, client=name)
 
@@ -314,6 +367,14 @@ def customer_360(name: str, access: Access = Depends(get_access)):
         vcols = ["id", "meeting_date", "meeting_time", "meeting_type", "meeting_status", "sales_person", "team",
                  "product", "client_response", "notes", "next_meeting_date", "order_amount", "quantity"]
         visits = [dict(zip(vcols, r)) for r in cur.fetchall()]
+        cur.execute(
+            f"""SELECT COUNT(*), MIN(CASE WHEN v.next_meeting_date ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}'
+                                         AND v.next_meeting_date >= %s THEN v.next_meeting_date END)
+                FROM visit_entries v
+                WHERE LOWER(TRIM(v.client_name)) = LOWER(TRIM(%s)) {_visit_scope_sql(access)}""",
+            [_today().isoformat(), name] + _visit_scope_params(access),
+        )
+        visit_total, next_fu = cur.fetchone()
 
     if not ym and not visits:
         raise HTTPException(status_code=404, detail="Customer not found in your scope")
@@ -331,7 +392,7 @@ def customer_360(name: str, access: Access = Depends(get_access)):
 
     # last 24 months series
     month_map = {(y, m): (q, a) for y, m, q, a in ym}
-    today = date.today()
+    today = _today()
     series = []
     yy, mm = today.year, today.month
     for _ in range(24):
@@ -368,10 +429,6 @@ def customer_360(name: str, access: Access = Depends(get_access)):
     else:
         status = "prospect"
 
-    upcoming = sorted(
-        [v for v in visits if v.get("next_meeting_date") and str(v["next_meeting_date"]) >= today.isoformat()],
-        key=lambda v: str(v["next_meeting_date"]),
-    )
     return {
         "name": name,
         "status": status,
@@ -385,9 +442,9 @@ def customer_360(name: str, access: Access = Depends(get_access)):
         "products": product_list[:15],
         "salespersons": people[:10],
         "visits": visits,
-        "visit_count": len(visits),
+        "visit_count": int(visit_total or 0),
         "last_visit": visits[0]["meeting_date"] if visits else None,
-        "next_followup": upcoming[0]["next_meeting_date"] if upcoming else None,
+        "next_followup": next_fu,
     }
 
 
@@ -403,7 +460,7 @@ def visit_planner(
     access: Access = Depends(get_access),
 ):
     """Week view + follow-up queues built from visit_entries (scoped like /api/visit-entries)."""
-    today = date.today()
+    today = _today()
     start = start or (today - timedelta(days=today.weekday()))  # Monday
     days = max(1, min(int(days), 31))
     end = start + timedelta(days=days - 1)
@@ -434,7 +491,7 @@ def visit_planner(
         # every visit that asked for a follow-up recently, plus later visits to detect completion
         cur.execute(
             f"""SELECT {sel} FROM visit_entries v
-                WHERE COALESCE(v.next_meeting_date, '') <> ''
+                WHERE v.next_meeting_date ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}'
                   AND v.next_meeting_date >= %s AND v.next_meeting_date <= %s {scope_sql} {sp_sql}
                 ORDER BY v.next_meeting_date, v.id""",
             [lookback.isoformat(), horizon.isoformat()] + scope_params + sp_params,
