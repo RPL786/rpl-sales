@@ -489,3 +489,29 @@ def test_customer_360_visits_only_prospect(client, admin, org):
     assert c["status"] == "prospect" and c["visit_count"] == 1 and len(c["visits"]) == 1
     soon = client.get("/api/v2/customers/360?name=Soon Co", headers=admin).json()
     assert soon["next_followup"] == (_date.today() + _td(days=3)).isoformat()
+
+
+# ============================================================ Round 1: all-teams dashboard, safe clear
+def test_dashboard_without_team_combines_scope(client, admin, org):
+    body = client.get("/dashboard/db", headers=admin).json()
+    assert not body["metadata"].get("empty_state")
+    assert body["metadata"]["view_label"] == "All teams"
+    names = {m["name"] for m in body["team"]}
+    assert {"ALI KHAN", "AHMED", "USMAN"} <= names
+
+    coord = login(client, "khi_coord", "pass1234")
+    cb = client.get("/dashboard/db", headers=coord).json()
+    cnames = {m["name"] for m in cb["team"]}
+    assert "USMAN" not in cnames and "ALI KHAN" in cnames
+    assert cb["metadata"]["view_label"] == "All my teams"
+    assert client.get("/dashboard/db?teams=Lahore Team", headers=coord).status_code == 403
+    one = client.get("/dashboard/db?teams=BCM", headers=coord).json()
+    assert {m["name"] for m in one["team"]} <= {"AHMED"}
+
+
+def test_clear_database_needs_typed_confirmation(client, admin, org):
+    r = client.post("/admin/clear-database", headers=admin)
+    assert r.status_code == 400
+    r = client.post("/admin/clear-database", json={"confirm": "delete"}, headers=admin)
+    assert r.status_code == 400
+    assert client.get("/dashboard/db?team=BCM", headers=admin).json()["summary"]["this_year_sales"] > 0
