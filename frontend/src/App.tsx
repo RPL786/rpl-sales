@@ -55,6 +55,7 @@ const VisitPlanner = lazy(() => import("./v2/VisitPlanner"));
 const Customer360 = lazy(() => import("./v2/Customer360"));
 const ImportDialog = lazy(() => import("./v2/ImportDialog"));
 const DangerZone = lazy(() => import("./v2/DangerZone"));
+const HomePage = lazy(() => import("./v2/HomePage"));
 
 // Tabs that use the Global Filters (team / city / branch / salesperson / month / products)
 const FILTER_TABS = ["overview", "multiYear", "clients", "products", "team", "recovery", "executive"];
@@ -63,7 +64,7 @@ import Sidebar, { APP_VERSION } from "./v2/Sidebar";
 import LoginPage from "./v2/LoginPage";
 import { chartColors } from "./v2/accent";
 import { apiJson } from "./v2/authFetch";
-import { ArrowUpRight, Building2, CalendarClock, ClipboardList, Contact, Layers, MapPin, SlidersHorizontal } from "lucide-react";
+import { ArrowUpRight, Building2, CalendarClock, ClipboardList, Contact, House, Layers, MapPin, SlidersHorizontal } from "lucide-react";
 import ActionMenu from "./v2/ActionMenu";
 
 type ClientStatus = "new" | "lost" | "retained";
@@ -83,7 +84,7 @@ const TabFallback = () => (
   </div>
 );
 
-type TabKey = "overview" | "clients" | "products" | "team" | "recovery" | "executive" | "visit" | "dataEntry" | "admin" | "forecast" | "productContribution" | "organization" | "multiYear" | "planner" | "customers";
+type TabKey = "overview" | "clients" | "products" | "team" | "recovery" | "executive" | "visit" | "dataEntry" | "admin" | "forecast" | "productContribution" | "organization" | "multiYear" | "planner" | "customers" | "home";
 
 type OrgTreeTeam = { id: number; name: string; branch_id: number | null };
 type OrgTreeBranch = { id: number; city_id: number; name: string; code: string; teams: OrgTreeTeam[] };
@@ -99,6 +100,7 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 const NAV_GROUPS: { key: string; label: string; tabs: TabKey[] }[] = [
+  { key: "start", label: "Start", tabs: ["home"] },
   {
     key: "intel",
     label: "Sales Intelligence",
@@ -522,8 +524,8 @@ if (!authUser) {
   const [error, setError] = useState("");
   const [lastRefreshLabel, setLastRefreshLabel] = useState("");
 
-  // Managers land on the sales overview, field staff on their Visit Planner
-  const [activeTab, setActiveTab] = useState(() => (canViewDashboards ? "overview" : "planner"));
+  // Everyone lands on their role's Home (Boss / Team Leader / "Mera Din")
+  const [activeTab, setActiveTab] = useState<string>("home");
 
   useEffect(() => {
     if ((activeTab === "admin" || activeTab === "organization") && authUser?.role !== "admin") {
@@ -596,19 +598,24 @@ if (!authUser) {
     { key: "multiYear", label: "Multi-Year", icon: <Layers size={16} /> },
     { key: "planner", label: "Visit Planner", icon: <CalendarClock size={16} /> },
     { key: "customers", label: "Customer 360", icon: <Contact size={16} /> },
+    { key: "home", label: "Home", icon: <House size={16} /> },
   ];
 
   const visibleTabs = tabs.filter((tab) => {
     if (tab.key === "admin" || tab.key === "organization") return isAdmin;
     if (canViewDashboards) return true;
-    return ["visit", "dataEntry", "planner", "customers"].includes(tab.key);
+    return ["home", "visit", "dataEntry", "planner", "customers"].includes(tab.key);
   });
   const visibleGroups = NAV_GROUPS.map((g) => ({
     ...g,
     items: visibleTabs.filter((t) => g.tabs.includes(t.key)),
   })).filter((g) => g.items.length > 0);
   const activeTabLabel =
-    activeTab === "overview" ? "Sales Overview" : tabs.find((t) => t.key === activeTab)?.label ?? "Dashboard";
+    activeTab === "overview"
+      ? "Sales Overview"
+      : activeTab === "home"
+      ? "Home"
+      : tabs.find((t) => t.key === activeTab)?.label ?? "Dashboard";
 
   // City > Branch filter narrows the Team list (scope is enforced by the backend as well)
   const branchOptions = orgCities
@@ -2906,6 +2913,16 @@ const productSelectionLabel =
                   axisProps={axisProps}
                 />
               )
+            )}
+            {activeTab === "home" && (
+              <HomePage
+                canViewDashboards={canViewDashboards}
+                onNavigate={(tab) => setActiveTab(tab)}
+                onOpenCustomer={(name) => {
+                  setCustomerFocus(name);
+                  setActiveTab("customers");
+                }}
+              />
             )}
             {activeTab === "planner" && (
               <VisitPlanner

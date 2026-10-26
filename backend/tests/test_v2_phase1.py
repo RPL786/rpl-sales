@@ -515,3 +515,51 @@ def test_clear_database_needs_typed_confirmation(client, admin, org):
     r = client.post("/admin/clear-database", json={"confirm": "delete"}, headers=admin)
     assert r.status_code == 400
     assert client.get("/dashboard/db?team=BCM", headers=admin).json()["summary"]["this_year_sales"] > 0
+
+
+# ============================================================ Round 2: role home pages + targets
+def test_home_pages_by_role(client, admin, org):
+    from v2.analytics import _today
+    t = _today()
+    mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][t.month - 1]
+    for uname, val in [("saddam", 100), ("ali", 50)]:
+        r = client.put("/admin/monthly-target", headers=admin, json={
+            "username": uname, "team": "Tile Adhesive", "year": t.year, "month": mon,
+            "target_type": "QTY", "target_value": val})
+        assert r.status_code == 200, r.text
+    for sp, q in [("saddam", 30), ("ali", 10)]:
+        r = client.post("/data/entry", headers=admin, json={
+            "team": "Tile Adhesive", "sales_person": sp, "client_name": "Home Co", "product": "TA-100",
+            "entry_date": t.isoformat(), "quantity": q})
+        assert r.status_code == 200, r.text
+
+    leader = client.get("/api/v2/home", headers=login(client, "saddam", "pass1234")).json()
+    assert leader["kind"] == "leader"
+    ta = next(x for x in leader["teams"] if x["team"] == "Tile Adhesive")
+    assert ta["target"] == 150 and ta["achieved"] >= 40
+    people = {p["username"]: p for p in leader["top_people"]}
+    assert people["saddam"]["pct"] == 30.0 and people["ali"]["pct"] == 20.0
+    prog = leader["progress"][0]
+    assert prog["unit"] == "QTY" and prog["target"] == 150
+    assert prog["required_per_day"] is not None and prog["status"] in {"on_track", "close", "behind", "done"}
+    assert {x["team"] for x in leader["teams"]} == {"Tile Adhesive"}
+
+    member = client.get("/api/v2/home", headers=login(client, "ali", "pass1234")).json()
+    assert member["kind"] == "member"
+    assert member["progress"][0]["target"] == 50 and member["progress"][0]["achieved"] == 10
+    assert member["teams"] == [] and member["top_people"][0]["username"] == "ali"
+    assert member["sales"]["mtd_qty"] == 10
+
+    boss = client.get("/api/v2/home", headers=login(client, "boss", "pass1234")).json()
+    assert boss["kind"] == "manager" and len(boss["teams"]) >= 3
+
+    coord = client.get("/api/v2/home", headers=login(client, "khi_coord", "pass1234")).json()
+    assert "Lahore Team" not in {x["team"] for x in coord["teams"]}
+
+
+def test_home_progress_ignores_teams_without_target(client, admin, org):
+    body = client.get("/api/v2/home", headers=admin).json()
+    qty = next(p for p in body["progress"] if p["unit"] == "QTY")
+    with_target = [t for t in body["teams"] if t["target"] and t["unit"] == "QTY"]
+    assert qty["target"] == sum(t["target"] for t in with_target)
+    assert qty["achieved"] == sum(t["achieved"] for t in with_target)
