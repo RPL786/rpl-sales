@@ -56,6 +56,7 @@ const Customer360 = lazy(() => import("./v2/Customer360"));
 const ImportDialog = lazy(() => import("./v2/ImportDialog"));
 const DangerZone = lazy(() => import("./v2/DangerZone"));
 const HomePage = lazy(() => import("./v2/HomePage"));
+const QuickVisit = lazy(() => import("./v2/QuickVisit"));
 
 // Tabs that use the Global Filters (team / city / branch / salesperson / month / products)
 const FILTER_TABS = ["overview", "multiYear", "clients", "products", "team", "recovery", "executive"];
@@ -66,6 +67,9 @@ import { chartColors } from "./v2/accent";
 import { apiJson } from "./v2/authFetch";
 import { ArrowUpRight, Building2, CalendarClock, ClipboardList, Contact, House, Layers, MapPin, SlidersHorizontal } from "lucide-react";
 import ActionMenu from "./v2/ActionMenu";
+import NotificationBell from "./v2/NotificationBell";
+import { canInstall, isStandalone, promptInstall } from "./v2/pwa";
+import { ClipboardPlus, Grid3x3, Smartphone } from "lucide-react";
 
 type ClientStatus = "new" | "lost" | "retained";
 type Severity = "high" | "medium" | "low";
@@ -546,6 +550,16 @@ if (!authUser) {
   // V2: the dashboard always reads the database; Excel is only a way to import data
   const dataSource = "database" as const;
   const [importOpen, setImportOpen] = useState(false);
+  const [installable, setInstallable] = useState(() => canInstall() && !isStandalone());
+  const [visitMode, setVisitMode] = useState<"quick" | "grid">(() => {
+    try {
+      const saved = localStorage.getItem("rpl-visit-mode");
+      if (saved === "quick" || saved === "grid") return saved;
+    } catch {
+      /* ignore */
+    }
+    return window.innerWidth < 900 ? "quick" : "grid";
+  });
   const [filtersCollapsed, setFiltersCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem("rpl-filters-collapsed") === "1";
@@ -784,6 +798,20 @@ if (!authUser) {
     loadDashboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTeam, selectedCityId, selectedBranchId, masterTeams.length]);
+
+  useEffect(() => {
+    const onInstall = () => setInstallable(canInstall() && !isStandalone());
+    window.addEventListener("rpl-install-available", onInstall);
+    return () => window.removeEventListener("rpl-install-available", onInstall);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("rpl-visit-mode", visitMode);
+    } catch {
+      /* ignore */
+    }
+  }, [visitMode]);
 
   useEffect(() => {
     try {
@@ -2502,8 +2530,12 @@ const productSelectionLabel =
                   <RefreshCw size={16} className={loading ? "v2-spin" : undefined} /> Refresh
                 </button>
               )}
+              <NotificationBell onNavigate={(tab) => setActiveTab(tab)} />
               <ActionMenu
                 items={[
+                  ...(installable
+                    ? [{ key: "install", label: "Install app", hint: "Add RPL Sales to this phone / PC", icon: <Smartphone size={15} />, onClick: () => { promptInstall(); } }]
+                    : []),
                   ...(canViewDashboards
                     ? [{ key: "pdf", label: "Executive PDF", hint: "Print / save as PDF", icon: <Download size={15} />, onClick: exportPdf }]
                     : []),
@@ -2889,7 +2921,28 @@ const productSelectionLabel =
             {activeTab === "team" && renderTeamTab()}
             {activeTab === "recovery" && renderRecoveryTab()}
             {activeTab === "executive" && renderExecutiveTab()}
-            {activeTab === "visit" && <VisitForm />}
+            {activeTab === "visit" && (
+              <div className="v2-stack">
+                <div className="v2-visit-switch">
+                  <div className="v2-seg" role="tablist" aria-label="Visit entry mode">
+                    <button className={visitMode === "quick" ? "active" : ""} onClick={() => setVisitMode("quick")}>
+                      <ClipboardPlus size={15} /> Quick entry
+                    </button>
+                    <button className={visitMode === "grid" ? "active" : ""} onClick={() => setVisitMode("grid")}>
+                      <Grid3x3 size={15} /> Daily grid
+                    </button>
+                  </div>
+                  <span className="org-muted">
+                    {visitMode === "quick" ? "One visit at a time — best on a phone, works offline." : "Many visits for one day in a table — best on a computer."}
+                  </span>
+                </div>
+                {visitMode === "quick" ? (
+                  <QuickVisit canChooseOwner={isAdmin || userRole === "dashboard_admin"} />
+                ) : (
+                  <VisitForm />
+                )}
+              </div>
+            )}
             {activeTab === "dataEntry" && <DataEntry />}
             {activeTab === "forecast" && <ForecastTab />}
             {activeTab === "productContribution" && <ProductContributionTab />}
@@ -2941,6 +2994,30 @@ const productSelectionLabel =
           </Suspense>
         </div>
       </div>
+
+        <nav className="v2-bottom-nav" aria-label="Quick navigation">
+          {[
+            { key: "home", label: "Home", icon: <House size={20} /> },
+            { key: "planner", label: "Planner", icon: <CalendarClock size={20} /> },
+            { key: "visit", label: "Log visit", icon: <ClipboardPlus size={22} />, primary: true },
+            { key: "customers", label: "Customers", icon: <Contact size={20} /> },
+            canViewDashboards
+              ? { key: "overview", label: "Sales", icon: <LayoutDashboard size={20} /> }
+              : { key: "dataEntry", label: "Sales entry", icon: <ClipboardList size={20} /> },
+          ].map((it) => (
+            <button
+              key={it.key}
+              className={`${activeTab === it.key ? "active" : ""} ${(it as any).primary ? "primary" : ""}`}
+              onClick={() => {
+                if (it.key === "visit") setVisitMode("quick");
+                setActiveTab(it.key);
+              }}
+            >
+              <span>{it.icon}</span>
+              <small>{it.label}</small>
+            </button>
+          ))}
+        </nav>
 
         {importOpen && (
           <Suspense fallback={null}>

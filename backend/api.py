@@ -6276,7 +6276,22 @@ def download_backup(user: dict = Depends(require_admin)):
 async def serve_react_app(full_path: str):
     if full_path.startswith(("dashboard", "upload", "reset", "salesperson-insights", "api", "data-entry", "form", "data", "forecast", "admin")):
         raise HTTPException(status_code=404, detail="API route not found")
-    return FileResponse(FRONTEND_DIST / "index.html")
+    # V2: real files from the build (manifest, service worker, icons) are served as-is
+    if full_path:
+        try:
+            candidate = (FRONTEND_DIST / full_path).resolve()
+            if candidate.is_file() and FRONTEND_DIST.resolve() in candidate.parents:
+                headers = {}
+                media_type = None
+                if candidate.name == "sw.js":
+                    headers = {"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"}
+                    media_type = "application/javascript"
+                elif candidate.suffix == ".webmanifest":
+                    media_type = "application/manifest+json"
+                return FileResponse(candidate, media_type=media_type, headers=headers)
+        except (OSError, ValueError):
+            pass
+    return FileResponse(FRONTEND_DIST / "index.html", headers={"Cache-Control": "no-cache"})
 
 if __name__ == "__main__":
     print("Starting Sales Dashboard Server...")
