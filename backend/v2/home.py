@@ -246,3 +246,37 @@ def home(access: Access = Depends(get_access)):
         if any(d["date"] == today.isoformat() for d in planner["days"]) else [],
         "visits_this_week": planner["summary"]["visits_in_range"],
     }
+
+
+@router.get("/notifications")
+def notifications(access: Access = Depends(get_access)):
+    """Bell items derived from the Home data: follow-ups, people behind pace, own run-rate, customers at risk."""
+    h = home(access)
+    items = []
+    fu = h["followups"]
+    if fu["overdue"]:
+        names = ", ".join(v["client_name"] for v in fu["overdue_list"][:3])
+        items.append({"kind": "overdue", "level": "high", "tab": "planner",
+                      "title": f"{fu['overdue']} overdue follow-up{'s' if fu['overdue'] != 1 else ''}",
+                      "detail": names})
+    if fu["today"]:
+        names = ", ".join(v["client_name"] for v in fu["today_list"][:3])
+        items.append({"kind": "today", "level": "medium", "tab": "planner",
+                      "title": f"{fu['today']} follow-up{'s' if fu['today'] != 1 else ''} due today",
+                      "detail": names})
+    if h["kind"] != "member" and h["attention"]:
+        names = ", ".join(p["username"] for p in h["attention"][:4])
+        items.append({"kind": "behind", "level": "medium", "tab": "home",
+                      "title": f"{len(h['attention'])} people behind this month's target pace",
+                      "detail": names})
+    for p in h["progress"]:
+        if p["status"] in {"behind", "close"} and p["required_per_day"]:
+            unit = "Rs " if p["unit"] == "AMOUNT" else ""
+            items.append({"kind": "pace", "level": "medium", "tab": "home",
+                          "title": f"Need {unit}{round(p['required_per_day']):,} per day to reach the {h['month']['name']} target",
+                          "detail": f"{p['pct'] or 0:.0f}% done with {h['month']['days_left']} days left"})
+    if h["at_risk"]["count"]:
+        items.append({"kind": "risk", "level": "low", "tab": "home",
+                      "title": f"{h['at_risk']['count']} customers bought last year but not yet this year",
+                      "detail": ", ".join(c["name"] for c in h["at_risk"]["top"][:3])})
+    return {"count": sum(1 for i in items if i["level"] in {"high", "medium"}), "items": items, "today": h["today"]}

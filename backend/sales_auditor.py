@@ -223,8 +223,8 @@ def generate_rule_based_findings(visit_summary: Dict[str, Any], sales_summary: D
     if repeated:
         worst = repeated[0]
         findings.append(
-            f"{worst['sales_person']} bar bar {worst['client_name']} ke paas ja raha hai lekin result zero hai. "
-            f"Yahan waste-of-time review banta hai."
+            f"{worst['sales_person']} keeps visiting {worst['client_name']} with zero results. "
+            f"This needs a waste-of-time review."
         )
 
     visit_people = {row["sales_person"]: row for row in visit_summary.get("salespersons", [])}
@@ -234,17 +234,17 @@ def generate_rule_based_findings(visit_summary: Dict[str, Any], sales_summary: D
         sales_total = safe_float(sales_people.get(person, {}).get("sales_total", 0))
         if v["total_visits"] >= 5 and v["successful_orders"] == 0 and sales_total <= 0:
             findings.append(
-                f"{person} ne kaafi visits ki hain lekin order/sales output nazar nahi aa raha. Is bande ki field efficiency check honi chahiye."
+                f"{person} has made many visits but no orders/sales are showing. Their field efficiency should be checked."
             )
 
     future_meetings = visit_summary.get("future_meetings", [])
     if future_meetings:
         findings.append(
-            f"System mein {len(future_meetings)} future meetings scheduled hain. Boss follow-up discipline monitor kar sakta hai."
+            f"{len(future_meetings)} future meetings are scheduled in the system. Management can monitor follow-up discipline."
         )
 
     if not findings:
-        findings.append("Abhi data mein koi clear red flag nahi mili, lekin aur visit logs aane par audit zyada strong hoga.")
+        findings.append("No clear red flags in the data yet; the audit will get stronger as more visit logs come in.")
 
     return findings
 
@@ -259,20 +259,20 @@ def call_gemini_for_audit(api_key: Optional[str], combined_text: str) -> Optiona
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-2.5-flash")
         prompt = f"""
-Tum ek strict sales audit manager ho.
+You are a strict sales audit manager.
 
-Neeche visit logs aur sales workbook ka combined audit snapshot diya gaya hai:
+Below is a combined audit snapshot of the visit logs and the sales workbook:
 
 {combined_text}
 
-Mujhe Roman Urdu + simple English mein:
+Respond in clear, simple English with:
 1. Top 5 findings
-2. Kaun banda andhere mein rakh raha ho sakta hai
-3. Kaun client loop waste lag raha hai
-4. Kya action boss ko abhi lena chahiye
-5. Next week monitoring checklist
+2. Which salesperson may be keeping management in the dark
+3. Which client loops look like wasted effort
+4. What action management should take right now
+5. A monitoring checklist for next week
 
-Jawab crisp, management-style aur direct do.
+Keep the answer crisp, management-style and direct.
 """
         response = model.generate_content(prompt)
         text = getattr(response, "text", None)

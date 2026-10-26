@@ -122,7 +122,7 @@ export default function VisitPlanner({ canFilterPeople, onLogVisit, onOpenCustom
         </div>
       </div>
       <div className="v2-follow-list">
-        {items.length === 0 && <p className="org-muted">Kuch pending nahi 🎉</p>}
+        {items.length === 0 && <p className="org-muted">Nothing pending 🎉</p>}
         {items.slice(0, 40).map((v) => (
           <button key={`${v.id}-${kind}`} className="v2-follow-item" onClick={() => setDetail(v)}>
             <div>
@@ -149,7 +149,7 @@ export default function VisitPlanner({ canFilterPeople, onLogVisit, onOpenCustom
               <CalendarClock size={20} /> Visit Planner
             </h2>
             <p className="section-subtext">
-              {data ? `${dayNum(data.start)} – ${dayNum(data.end)}` : "This week"} · follow-ups khud track hote hain
+              {data ? `${dayNum(data.start)} – ${dayNum(data.end)}` : "This week"} · follow-ups are tracked automatically
             </p>
           </div>
           <div className="v2-controls">
@@ -200,7 +200,7 @@ export default function VisitPlanner({ canFilterPeople, onLogVisit, onOpenCustom
         <div className="section-head">
           <div>
             <h2>Week view</h2>
-            <p className="section-subtext">Har din ki visits — card par click karein</p>
+            <p className="section-subtext">Visits for each day — click a card for details</p>
           </div>
         </div>
         <div className="v2-week">

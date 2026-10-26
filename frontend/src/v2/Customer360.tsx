@@ -54,9 +54,9 @@ const fmt = (v: number) => new Intl.NumberFormat().format(Math.round(v || 0));
 const STATUS: Record<C360["status"], { label: string; tone: string }> = {
   new: { label: "New customer", tone: "good" },
   active: { label: "Active", tone: "good" },
-  at_risk: { label: "At risk — is saal order nahi", tone: "warm" },
+  at_risk: { label: "At risk — no order this year", tone: "warm" },
   lost: { label: "Lost", tone: "bad" },
-  prospect: { label: "Prospect (sirf visits)", tone: "neutral" },
+  prospect: { label: "Prospect (visits only)", tone: "neutral" },
 };
 
 export default function Customer360({ initialName, chart, tooltipProps, axisProps }: Props) {
@@ -132,14 +132,14 @@ export default function Customer360({ initialName, chart, tooltipProps, axisProp
             <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Contact size={20} /> Customer 360
             </h2>
-            <p className="section-subtext">Customer ka naam likhein — sales, products, salesperson aur visits ek jagah</p>
+            <p className="section-subtext">Type a customer name — sales, products, salespersons and visits in one place</p>
           </div>
         </div>
         <div className="v2-search">
           <Search size={18} />
           <input
             value={q}
-            placeholder="Customer search karein (kam az kam 2 letters)…"
+            placeholder="Search customers (at least 2 letters)…"
             onChange={(e) => setQ(e.target.value)}
             onFocus={() => hits.length && setOpen(true)}
           />
@@ -182,7 +182,7 @@ export default function Customer360({ initialName, chart, tooltipProps, axisProp
       {!selected && !loading && (
         <div className="card v2-empty">
           <Contact size={40} />
-          <p>Upar search box mein customer ka naam likhein.</p>
+          <p>Type a customer name in the search box above.</p>
         </div>
       )}
 
@@ -263,7 +263,7 @@ export default function Customer360({ initialName, chart, tooltipProps, axisProp
             <div className="section-head">
               <div>
                 <h2>Last 24 months</h2>
-                <p className="section-subtext">Mahana quantity</p>
+                <p className="section-subtext">Monthly quantity</p>
               </div>
             </div>
             <div className="chart-wrap">
@@ -292,7 +292,7 @@ export default function Customer360({ initialName, chart, tooltipProps, axisProp
                   <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <Package size={18} /> Products
                   </h2>
-                  <p className="section-subtext">Kya kya khareedta hai</p>
+                  <p className="section-subtext">What they buy</p>
                 </div>
               </div>
               <div className="table-wrap">
@@ -323,7 +323,7 @@ export default function Customer360({ initialName, chart, tooltipProps, axisProp
                     {data.products.length === 0 && (
                       <tr>
                         <td colSpan={data.yearly.length + 2} className="org-muted">
-                          Abhi koi sale nahi
+                          No sales yet
                         </td>
                       </tr>
                     )}
@@ -338,7 +338,7 @@ export default function Customer360({ initialName, chart, tooltipProps, axisProp
                   <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <UserRound size={18} /> Salespersons
                   </h2>
-                  <p className="section-subtext">Kaun deal karta hai</p>
+                  <p className="section-subtext">Who handles this customer</p>
                 </div>
               </div>
               <div className="v2-follow-list">
@@ -360,7 +360,7 @@ export default function Customer360({ initialName, chart, tooltipProps, axisProp
             <div className="section-head">
               <div>
                 <h2>Visit timeline</h2>
-                <p className="section-subtext">Aakhri {data.visits.length} visits</p>
+                <p className="section-subtext">Last {data.visits.length} visits</p>
               </div>
             </div>
             <ol className="v2-timeline">
@@ -375,7 +375,7 @@ export default function Customer360({ initialName, chart, tooltipProps, axisProp
                   </div>
                 </li>
               ))}
-              {data.visits.length === 0 && <p className="org-muted">Is customer ki koi visit record nahi.</p>}
+              {data.visits.length === 0 && <p className="org-muted">No visits recorded for this customer.</p>}
             </ol>
           </div>
         </>

@@ -182,7 +182,7 @@ export default function AdminPanel() {
 
   const deactivateUser = async (userId: number) => {
     const inactiveDate = window.prompt(
-      "Inactive date enter karein YYYY-MM-DD format me",
+      "Enter the inactive date (YYYY-MM-DD)",
       new Date().toISOString().slice(0, 10)
     );
 
@@ -227,17 +227,17 @@ export default function AdminPanel() {
   };
 
   const shiftUserTeam = async (u: UserItem) => {
-    const newTeam = window.prompt("New team name enter karein", u.team || "");
+    const newTeam = window.prompt("Enter the new team name", u.team || "");
     if (!newTeam) return;
 
     const effectiveDate = window.prompt(
-      "Effective date enter karein YYYY-MM-DD format me",
+      "Enter the effective date (YYYY-MM-DD)",
       new Date().toISOString().slice(0, 10)
     );
 
     if (!effectiveDate) return;
 
-    if (!window.confirm(`${u.username} ko ${newTeam} team me ${effectiveDate} se shift karna hai?`)) {
+    if (!window.confirm(`Move ${u.username} to team ${newTeam} effective ${effectiveDate}?`)) {
       return;
     }
 

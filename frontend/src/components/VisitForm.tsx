@@ -306,19 +306,19 @@ export default function VisitForm() {
     const activeSalesPerson = canSelectTeamAndSalesPerson ? salesPerson : authUser?.username || "";
 
     if (!activeTeam) {
-      setMessage("Team required hai.");
+      setMessage("Team is required.");
       return;
     }
     if (!activeSalesPerson) {
-      setMessage("Sales person required hai.");
+      setMessage("Sales person is required.");
       return;
     }
     if (!meetingDate) {
-      setMessage("Visit date required hai.");
+      setMessage("Visit date is required.");
       return;
     }
     if (completedRows.length === 0) {
-      setMessage("Kam az kam 1 complete visit row fill karein.");
+      setMessage("Please fill in at least 1 complete visit row.");
       return;
     }
 
@@ -495,7 +495,7 @@ export default function VisitForm() {
         if (!isAdmin) return;
 
         if (!filteredVisits.length) {
-          alert("PDF ke liye koi visit data available nahi hai.");
+          alert("No visit data is available for the PDF.");
           return;
         }
 
@@ -584,7 +584,7 @@ export default function VisitForm() {
         doc.save("sales-followup-report.pdf");
       } catch (err: any) {
         console.error("Follow-up PDF failed:", err);
-        alert(err?.message || "Follow-up PDF generate nahi hui.");
+        alert(err?.message || "Could not generate the follow-up PDF.");
       }
     };
 
@@ -593,7 +593,7 @@ export default function VisitForm() {
       <div className="section-head">
         <div>
           <h2>Day Wise Visit Form</h2>
-          <p className="section-subtext">Ek date ki sari visits Excel style me enter karein aur ek hi dafa save karein.</p>
+          <p className="section-subtext">Enter all visits for a date in a spreadsheet-style grid and save them in one go.</p>
         </div>
       </div>
 
@@ -976,7 +976,7 @@ export default function VisitForm() {
               Clear Date Filter
             </button>
           </div>
-          <p className="section-subtext">Purani aur new saved visits dono yahan show hongi.</p>
+          <p className="section-subtext">Both older and newly saved visits are shown here.</p>
         </div>
       </div>
 

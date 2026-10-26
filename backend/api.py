@@ -1575,6 +1575,7 @@ def build_gemini_prompt(context: Dict[str, Any]) -> str:
         "- Strategy and coaching must be operational and actionable.\n"
         "- If growth is negative or lost clients are high, say it clearly.\n"
         "- Keep responses concise and business-focused.\n"
+        "- Write all text in clear, professional English.\n"
 
         "Business rules:\n"
         "- Quantities may be in KG or Bags.\n"
@@ -2129,7 +2130,7 @@ def admin_list_users(user: dict = Depends(require_admin)):
 @app.delete("/admin/delete-user/{user_id}")
 def admin_delete_user(user_id: int, user: dict = Depends(require_admin)):
     if user.get("user_id") == user_id:
-        raise HTTPException(status_code=400, detail="Admin apna account deactivate nahi kar sakta")
+        raise HTTPException(status_code=400, detail="Admins cannot deactivate their own account")
 
     inactive_date = datetime.now().strftime("%Y-%m-%d")
 
@@ -2163,7 +2164,7 @@ def admin_deactivate_user(
     user: dict = Depends(require_admin),
 ):
     if user.get("user_id") == user_id:
-        raise HTTPException(status_code=400, detail="Admin apna account deactivate nahi kar sakta")
+        raise HTTPException(status_code=400, detail="Admins cannot deactivate their own account")
 
     inactive_date = str(payload.get("inactive_date") or "").strip()
     if not inactive_date:
@@ -2213,7 +2214,7 @@ def admin_reactivate_user(user_id: int, user: dict = Depends(require_admin)):
         team = row[1]
         role = row[2]
 
-        # Admin / Super User (aur V2 teamless roles) ko team ki zaroorat nahi
+        # Admin / Super User (and V2 teamless roles) do not need a team
         if role in V2_TEAMLESS_ROLES:
             cur.execute("""
                 UPDATE users
@@ -2226,7 +2227,7 @@ def admin_reactivate_user(user_id: int, user: dict = Depends(require_admin)):
             conn.commit()
             return {"status": "success", "message": "User reactivated successfully"}
 
-        # Normal user / team leader ke liye team required hai
+        # A team is required for normal users / team leaders
         if not team:
             cur.execute("""
                 SELECT team
@@ -4522,15 +4523,18 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
 
     q_lower = question.lower()
 
+    # Roman Urdu keywords (input detection only; replies are always English)
     roman_words = [
         "kitna", "kitni", "kitne", "batao", "kya", "kon", "kaun", "kis",
         "main", "mein", "hai", "hain", "tha", "thi", "thay", "ne", "ki",
         "ka", "kri", "kari", "hua", "hui", "wale", "wala", "zyada", "kam"
     ]
-    is_roman_urdu = any(w in q_lower.split() for w in roman_words)
+    # The app is English-only: replies are always in English, even when the
+    # question is typed in Roman Urdu (roman_words is kept for reference only).
+    is_roman_urdu = False
 
-    def reply(en_text: str, ru_text: str) -> str:
-        return ru_text if is_roman_urdu else en_text
+    def reply(en_text: str, ru_text: str = None) -> str:
+        return en_text
 
     month = extract_month_from_question(question)
 
@@ -4558,7 +4562,6 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
         compare_years = [year - 1, year]
 
     period_text_en = f"{month} {year}" if month else f"Full Year {year}"
-    period_text_ru = f"{month} {year}" if month else f"Full Year {year}"
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -4934,11 +4937,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 f"Salesperson count:\n"
                 f"Registered sales users: {registered_count}\n"
                 f"Salespersons with sales data in {period_text_en}: {sales_data_count}\n"
-                f"Salespersons with visit data in {period_text_en}: {visit_data_count}",
-                f"Salespersons count:\n"
-                f"Registered sales users: {registered_count}\n"
-                f"{period_text_ru} sales data wale salespersons: {sales_data_count}\n"
-                f"{period_text_ru} visit data wale salespersons: {visit_data_count}"
+                f"Salespersons with visit data in {period_text_en}: {visit_data_count}"
             )
 
             return {
@@ -4971,10 +4970,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             answer = reply(
                 f"Client count for {period_text_en}:\n"
                 f"Clients with sales: {sales_clients}\n"
-                f"Clients visited: {visit_clients}",
-                f"{period_text_ru} client count:\n"
-                f"Sales wale clients: {sales_clients}\n"
-                f"Visited clients: {visit_clients}"
+                f"Clients visited: {visit_clients}"
             )
 
             return {
@@ -5006,10 +5002,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             answer = reply(
                 f"Product count for {period_text_en}:\n"
                 f"Products sold: {sales_products}\n"
-                f"Products discussed in visits: {visit_products}",
-                f"{period_text_ru} product count:\n"
-                f"Sold products: {sales_products}\n"
-                f"Visit me discuss products: {visit_products}"
+                f"Products discussed in visits: {visit_products}"
             )
 
             return {
@@ -5028,8 +5021,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             team_count = int(cur.fetchone()[0] or 0)
 
             answer = reply(
-                f"We have {team_count} teams.",
-                f"Hamare paas total {team_count} teams hain."
+                f"We have {team_count} teams."
             )
 
             return {
@@ -5110,9 +5102,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
 
             answer = reply(
                 f"Product-wise comparison report for {month or 'Full Year'}:\n\n"
-                + ("\n".join(lines) if lines else "No product-wise comparison data found."),
-                f"{month or 'Full Year'} ka product-wise comparison report:\n\n"
-                + ("\n".join(lines) if lines else "Product-wise comparison data nahi mila.")
+                + ("\n".join(lines) if lines else "No product-wise comparison data found.")
             )
 
             return {
@@ -5270,15 +5260,6 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                     "\n\nMonth-wise details:\n" + "\n".join(month_lines)
                     if month_lines
                     else ""
-                ),
-                f"{month or 'Full Year'} comparison report:\n\n"
-                f"Year-wise summary:\n"
-                + ("\n".join(yearly_lines) if yearly_lines else "Comparison data nahi mila.")
-                + growth_text
-                + (
-                    "\n\nMonth-wise details:\n" + "\n".join(month_lines)
-                    if month_lines
-                    else ""
                 )
             )
 
@@ -5356,13 +5337,11 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                     )
 
                 answer = reply(
-                    f"Top on-call/on-phone salespersons for {period_text_en}:\n\n" + "\n".join(lines),
-                    f"{period_text_ru} me top on-call/on-phone salespersons:\n\n" + "\n".join(lines)
+                    f"Top on-call/on-phone salespersons for {period_text_en}:\n\n" + "\n".join(lines)
                 )
             else:
                 answer = reply(
-                    f"No call/phone notes found for {period_text_en}.",
-                    f"{period_text_ru} me call/phone notes nahi mile."
+                    f"No call/phone notes found for {period_text_en}."
                 )
 
             return {
@@ -5462,16 +5441,11 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                     f"Visit audit for {period_text_en}:\n\n"
                     f"Suspicious / verification required cases: {len(suspicious)}\n\n"
                     + "\n".join(lines)
-                    + "\n\nNote: These are not confirmed fake visits; they need manager verification.",
-                    f"{period_text_ru} visit audit:\n\n"
-                    f"Suspicious / verification required cases: {len(suspicious)}\n\n"
-                    + "\n".join(lines)
-                    + "\n\nNote: Ye confirmed fake nahi, manager verification required hai."
+                    + "\n\nNote: These are not confirmed fake visits; they need manager verification."
                 )
             else:
                 answer = reply(
-                    f"No obvious suspicious visit pattern found for {period_text_en}.",
-                    f"{period_text_ru} me koi obvious suspicious visit pattern nahi mila."
+                    f"No obvious suspicious visit pattern found for {period_text_en}."
                 )
 
             return {
@@ -5667,20 +5641,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 + ("\n".join(client_lines) if client_lines else "No client visit details found.")
                 + "\n\nWeak / verification required clients:\n"
                 + ("\n".join(weak_lines) if weak_lines else "No obvious weak or doubtful visit pattern found.")
-                + "\n\nNote: These are not confirmed fake visits; these are verification-required cases based on visits vs sales matching.",
-                f"{who} ki {period_text_ru} visit report:\n\n"
-                f"Total Visits: {total_visits}\n"
-                f"Clients Visited: {visited_clients}\n"
-                f"Salespersons: {visiting_salespersons}\n"
-                f"Visit Order Amount: Rs {order_amount:,.0f}\n"
-                f"Visit Quantity: {quantity:,.0f}\n\n"
-                f"Top visitors:\n"
-                + ("\n".join(top_lines) if top_lines else "Visitor data nahi mila.")
-                + "\n\nClient-wise visit details:\n"
-                + ("\n".join(client_lines) if client_lines else "Client visit details nahi mili.")
-                + "\n\nWeak / verification required clients:\n"
-                + ("\n".join(weak_lines) if weak_lines else "Koi obvious weak ya doubtful visit pattern nahi mila.")
-                + "\n\nNote: Ye confirmed fake visits nahi, visits vs sales matching ke basis par verification-required cases hain."
+                + "\n\nNote: These are not confirmed fake visits; these are verification-required cases based on visits vs sales matching."
             )
 
             return {
@@ -5710,8 +5671,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
             if not target_month:
                 return {
                     "answer": reply(
-                        "Please mention the month for target report, for example: July 2026 target report for all salespersons.",
-                        "Target report ke liye month mention karein, example: July 2026 all salespersons target report."
+                        "Please mention the month for target report, for example: July 2026 target report for all salespersons."
                     ),
                     "data": {
                         "type": "target_report_missing_month"
@@ -5818,14 +5778,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 f"Achievement: {total_percent:.1f}%\n"
                 f"Remaining: {total_remaining:,.0f}\n\n"
                 f"Salesperson-wise details:\n"
-                + ("\n".join(lines) if lines else "No target data found."),
-                f"{target_month} {year} all salespersons target vs achievement report:\n\n"
-                f"Total Target: {total_target:,.0f}\n"
-                f"Total Achieved: {total_achieved:,.0f}\n"
-                f"Achievement: {total_percent:.1f}%\n"
-                f"Remaining: {total_remaining:,.0f}\n\n"
-                f"Salesperson-wise details:\n"
-                + ("\n".join(lines) if lines else "Target data nahi mila.")
+                + ("\n".join(lines) if lines else "No target data found.")
             )
 
             return {
@@ -5917,16 +5870,12 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
 
             if not target_value:
                 direction_en = "Target is not set, so direction cannot be judged."
-                direction_ru = "Target set nahi hai, is liye direction judge nahi ho sakti."
             elif percent < 50:
                 direction_en = "Weak. Follow-up and conversion need improvement."
-                direction_ru = "Weak hai, follow-up aur conversion improve karni hogi."
             elif percent < 80:
                 direction_en = "Average. More push is needed to cover the target."
-                direction_ru = "Average hai, target cover karne ke liye push chahiye."
             else:
                 direction_en = "Good direction."
-                direction_ru = "Sahi direction me hai."
 
             lines = [
                 f"- {x['sales_person']}: {x['quantity']:,.0f} Qty, Rs {x['amount']:,.0f}, Clients {x['clients_count']}"
@@ -5943,15 +5892,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 f"Achievement: {percent:.1f}%\n"
                 f"Remaining: {remaining:,.0f} {unit}\n"
                 f"Direction: {direction_en}\n\n"
-                f"Salesperson details:\n" + ("\n".join(lines) if lines else "No salesperson data found."),
-                f"{who} ka {period_text_ru} performance:\n"
-                f"Achieved Qty: {total_qty:,.0f}\n"
-                f"Achieved Amount: Rs {total_amount:,.0f}\n"
-                f"Target: {target_value:,.0f} {unit}\n"
-                f"Achievement: {percent:.1f}%\n"
-                f"Remaining: {remaining:,.0f} {unit}\n"
-                f"Direction: {direction_ru}\n\n"
-                f"Salesperson details:\n" + ("\n".join(lines) if lines else "Salesperson data nahi mila.")
+                f"Salesperson details:\n" + ("\n".join(lines) if lines else "No salesperson data found.")
             )
 
             return {
@@ -5974,7 +5915,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
 
         # -----------------------------
         # Product share / percentage report
-        # Example: Aug main total sale kitni hui aur konsi product ka share kitna percent hai
+        # Example: "What was the total sale in Aug and what percent share did each product have?"
         # -----------------------------
         if wants_product_share:
             where, params = sales_filter()
@@ -6044,13 +5985,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 f"Total Amount: Rs {total_amount:,.0f}\n"
                 f"Products Sold: {len(rows)}\n\n"
                 f"Product-wise share of total sale:\n"
-                + ("\n".join(top_lines) if top_lines else "No product share data found."),
-                f"Overall {period_text} product share report:\n"
-                f"Total Qty: {total_qty:,.0f}\n"
-                f"Total Amount: Rs {total_amount:,.0f}\n"
-                f"Products Sold: {len(rows)}\n\n"
-                f"Total sale me product-wise share:\n"
-                + ("\n".join(top_lines) if top_lines else "Product share data nahi mila.")
+                + ("\n".join(top_lines) if top_lines else "No product share data found.")
             )
 
             return {
@@ -6149,12 +6084,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 f"Products Sold: {len(products_list)}\n"
                 f"Total Qty: {total_qty:,.0f}\n"
                 f"Total Amount: Rs {total_amount:,.0f}\n\n"
-                + ("\n".join(lines) if lines else "No product-wise sales data found."),
-                f"{who} ki {period_text_ru} product-wise sales client details ke sath:\n"
-                f"Products Sold: {len(products_list)}\n"
-                f"Total Qty: {total_qty:,.0f}\n"
-                f"Total Amount: Rs {total_amount:,.0f}\n\n"
-                + ("\n".join(lines) if lines else "Product-wise sales data nahi mila.")
+                + ("\n".join(lines) if lines else "No product-wise sales data found.")
             )
 
             return {
@@ -6214,11 +6144,7 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
                 f"{who} client-wise sales for {period_text_en}:\n"
                 f"Total Qty: {total_qty:,.0f}\n"
                 f"Total Amount: Rs {total_amount:,.0f}\n\n"
-                + ("\n".join(lines) if lines else "No client-wise sales data found."),
-                f"{who} ki {period_text_ru} client-wise sales:\n"
-                f"Total Qty: {total_qty:,.0f}\n"
-                f"Total Amount: Rs {total_amount:,.0f}\n\n"
-                + ("\n".join(lines) if lines else "Client-wise sales data nahi mila.")
+                + ("\n".join(lines) if lines else "No client-wise sales data found.")
             )
 
             return {
@@ -6272,15 +6198,6 @@ def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default
 
         answer = reply(
             f"{who} summary for {period_text_en}:\n"
-            f"Total Qty: {total_qty:,.0f}\n"
-            f"Total Amount: Rs {total_amount:,.0f}\n"
-            f"Sales Entries: {total_entries}\n"
-            f"Clients: {clients_count}\n"
-            f"Products: {products_count}\n"
-            f"Salespersons: {salespersons_count}\n"
-            f"Visits: {total_visits}\n"
-            f"Visited Clients: {visited_clients}",
-            f"{who} ka {period_text_ru} summary:\n"
             f"Total Qty: {total_qty:,.0f}\n"
             f"Total Amount: Rs {total_amount:,.0f}\n"
             f"Sales Entries: {total_entries}\n"
@@ -6359,7 +6276,22 @@ def download_backup(user: dict = Depends(require_admin)):
 async def serve_react_app(full_path: str):
     if full_path.startswith(("dashboard", "upload", "reset", "salesperson-insights", "api", "data-entry", "form", "data", "forecast", "admin")):
         raise HTTPException(status_code=404, detail="API route not found")
-    return FileResponse(FRONTEND_DIST / "index.html")
+    # V2: real files from the build (manifest, service worker, icons) are served as-is
+    if full_path:
+        try:
+            candidate = (FRONTEND_DIST / full_path).resolve()
+            if candidate.is_file() and FRONTEND_DIST.resolve() in candidate.parents:
+                headers = {}
+                media_type = None
+                if candidate.name == "sw.js":
+                    headers = {"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"}
+                    media_type = "application/javascript"
+                elif candidate.suffix == ".webmanifest":
+                    media_type = "application/manifest+json"
+                return FileResponse(candidate, media_type=media_type, headers=headers)
+        except (OSError, ValueError):
+            pass
+    return FileResponse(FRONTEND_DIST / "index.html", headers={"Cache-Control": "no-cache"})
 
 if __name__ == "__main__":
     print("Starting Sales Dashboard Server...")

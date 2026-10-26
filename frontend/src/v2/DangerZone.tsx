@@ -14,7 +14,7 @@ export default function DangerZone() {
     setError("");
     try {
       await apiJson("/admin/clear-database", { method: "POST", body: JSON.stringify({ confirm: "DELETE" }) });
-      alert("Database clear ho gaya.");
+      alert("Database cleared.");
       window.location.reload();
     } catch (e: any) {
       setError(e.message || "Clear failed");
@@ -31,8 +31,8 @@ export default function DangerZone() {
             <AlertTriangle size={20} /> Danger zone
           </h2>
           <p className="section-subtext">
-            Clear Database saara sales data, teams, clients aur products mita deta hai. Yeh wapas nahi hota — pehle
-            "Download Backup" zaroor lein.
+            Clear Database deletes all sales data, teams, clients and products. This cannot be undone — make sure
+            to "Download Backup" first.
           </p>
         </div>
       </div>
@@ -40,7 +40,7 @@ export default function DangerZone() {
         <input
           className="filter-select"
           style={{ maxWidth: 260 }}
-          placeholder='Confirm ke liye "DELETE" likhein'
+          placeholder='Type "DELETE" to confirm'
           value={text}
           onChange={(e) => setText(e.target.value)}
         />

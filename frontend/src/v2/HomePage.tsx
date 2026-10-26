@@ -73,17 +73,17 @@ const money = (unit: string, v: number) => (unit === "AMOUNT" ? `Rs ${fmt(v)}` :
 const unitLabel = (unit: string) => (unit === "AMOUNT" ? "Amount target" : "Quantity target");
 
 const STATUS: Record<string, { label: string; tone: string }> = {
-  done: { label: "Target poora 🎉", tone: "good" },
+  done: { label: "Target met 🎉", tone: "good" },
   on_track: { label: "On track", tone: "good" },
-  close: { label: "Thoda peeche", tone: "warm" },
-  behind: { label: "Peeche — speed barhayein", tone: "bad" },
+  close: { label: "Slightly behind", tone: "warm" },
+  behind: { label: "Behind — speed up", tone: "bad" },
 };
 
 function greeting() {
   const h = new Date().getHours();
-  if (h < 12) return "Subah bakhair";
-  if (h < 17) return "Assalam o Alaikum";
-  return "Shaam bakhair";
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
 }
 
 function Ring({ pct, expected, size = 150 }: { pct: number; expected: number; size?: number }) {
@@ -110,7 +110,7 @@ function Ring({ pct, expected, size = 150 }: { pct: number; expected: number; si
         transform={`rotate(-90 ${size / 2} ${size / 2})`}
       />
       <circle cx={ex} cy={ey} r={5} className="v2-ring-marker">
-        <title>Aaj tak itna hona chahiye tha</title>
+        <title>Expected progress by today</title>
       </circle>
       <text x="50%" y="48%" textAnchor="middle" className="v2-ring-value">
         {pct.toFixed(0)}%
@@ -138,7 +138,7 @@ function Bar({ pct, expected }: { pct: number | null; expected: number }) {
   return (
     <div className="v2-bar">
       <div className={`v2-bar-fill tone-${tone}`} style={{ width: `${p}%` }} />
-      <div className="v2-bar-expected" style={{ left: `${Math.min(expected, 100)}%` }} title="Aaj tak ka expected" />
+      <div className="v2-bar-expected" style={{ left: `${Math.min(expected, 100)}%` }} title="Expected by today" />
     </div>
   );
 }
@@ -181,8 +181,8 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
             {greeting()}, {data.username} 👋
           </h2>
           <p className="section-subtext">
-            {isMember ? "Yeh raha aap ka aaj ka din." : "Yeh raha aaj ka haal."} {m.name} {m.year} ka din {m.day}/{m.days} —{" "}
-            <b>{m.days_left} din baaqi</b>.
+            {isMember ? "Here's your day." : "Here's where things stand today."} Day {m.day}/{m.days} of {m.name} {m.year} —{" "}
+            <b>{m.days_left} days left</b>.
           </p>
         </div>
         <div className="v2-hello-actions">
@@ -209,7 +209,7 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
             <RefreshCw size={14} />
           </button>
         </div>
-        <div className="v2-month-track" title={`Mahina ${m.elapsed_pct}% guzar gaya`}>
+        <div className="v2-month-track" title={`${m.elapsed_pct}% of the month elapsed`}>
           <div style={{ width: `${m.elapsed_pct}%` }} />
         </div>
       </div>
@@ -219,9 +219,9 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
         <div className="card v2-empty-target">
           <Target size={28} />
           <div>
-            <strong>Is mahine ka target set nahi</strong>
+            <strong>No target set for this month</strong>
             <p className="org-muted">
-              Admin → Monthly target mein {isMember ? "aap ka" : "team members ka"} {m.name} target daalein, phir yahan progress aur roz ka hisaab nazar aayega.
+              Set {isMember ? "your" : "your team members'"} {m.name} target in Admin → Monthly target to see progress and the daily run rate here.
             </p>
           </div>
         </div>
@@ -249,7 +249,7 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
                       <strong>{money(p.unit, p.target)}</strong>
                     </div>
                     <div>
-                      <small>Baaqi</small>
+                      <small>Remaining</small>
                       <strong>{money(p.unit, p.remaining)}</strong>
                     </div>
                   </div>
@@ -257,21 +257,21 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
                     <div className="v2-runrate-item need">
                       <Flame size={16} />
                       <span>
-                        Roz chahiye
+                        Needed per day
                         <b>{p.required_per_day !== null ? money(p.unit, p.required_per_day) : "—"}</b>
                       </span>
                     </div>
                     <div className="v2-runrate-item">
                       <Gauge size={16} />
                       <span>
-                        Abhi roz
+                        Current per day
                         <b>{money(p.unit, p.current_per_day)}</b>
                       </span>
                     </div>
                     <div className="v2-runrate-item">
                       <TrendingUp size={16} />
                       <span>
-                        Mahine ke aakhir tak
+                        Projected month-end
                         <b>
                           {money(p.unit, p.projected)} {p.projected_pct !== null ? `(${p.projected_pct.toFixed(0)}%)` : ""}
                         </b>
@@ -294,9 +294,9 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
             </span>
             <Growth v={data.sales.mtd_growth} />
           </div>
-          <p className="metric-title">Is mahine ({data.sales.month_label})</p>
+          <p className="metric-title">This month ({data.sales.month_label})</p>
           <h3 className="metric-value">{fmt(data.sales.mtd_qty)}</h3>
-          <p className="metric-sub">Pichhle saal isi waqt: {fmt(data.sales.mtd_qty_ly)}</p>
+          <p className="metric-sub">Same time last year: {fmt(data.sales.mtd_qty_ly)}</p>
         </div>
         <div className="card metric-card">
           <div className="v2-kpi-head">
@@ -305,9 +305,9 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
             </span>
             <Growth v={data.sales.ytd_growth} />
           </div>
-          <p className="metric-title">Saal ab tak (YTD)</p>
+          <p className="metric-title">Year to date (YTD)</p>
           <h3 className="metric-value">{fmt(data.sales.ytd_qty)}</h3>
-          <p className="metric-sub">Pichhla saal: {fmt(data.sales.ytd_qty_ly)}</p>
+          <p className="metric-sub">Last year: {fmt(data.sales.ytd_qty_ly)}</p>
         </div>
         <button className="card metric-card v2-kpi-link" onClick={() => onNavigate("planner")}>
           <div className="v2-kpi-head">
@@ -320,7 +320,7 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
             {data.followups.overdue} <small className="v2-unit">overdue</small>
           </h3>
           <p className="metric-sub">
-            Aaj {data.followups.today} · agle 14 din {data.followups.upcoming}
+            Today {data.followups.today} · next 14 days {data.followups.upcoming}
           </p>
         </button>
         <div className="card metric-card">
@@ -331,7 +331,7 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
           </div>
           <p className="metric-title">Customers at risk</p>
           <h3 className="metric-value">{data.at_risk.count}</h3>
-          <p className="metric-sub">Pichhle saal khareeda, is saal abhi tak nahi</p>
+          <p className="metric-sub">Bought last year, nothing yet this year</p>
         </div>
       </div>
 
@@ -341,7 +341,7 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
           <div className="section-head">
             <div>
               <h2>Team targets — {m.name}</h2>
-              <p className="section-subtext">Kaali lakeer = aaj tak kitna hona chahiye tha ({m.elapsed_pct}%)</p>
+              <p className="section-subtext">Dark line = expected progress by today ({m.elapsed_pct}%)</p>
             </div>
           </div>
           <div className="v2-team-bars">
@@ -369,7 +369,7 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
                 <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <Trophy size={18} /> Leaderboard
                 </h2>
-                <p className="section-subtext">Is mahine target % ke hisaab se</p>
+                <p className="section-subtext">By target % this month</p>
               </div>
             </div>
             <div className="v2-people">
@@ -390,20 +390,20 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
             <div className="section-head">
               <div>
                 <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <AlarmClock size={18} /> Madad chahiye
+                  <AlarmClock size={18} /> Needs attention
                 </h2>
-                <p className="section-subtext">Aaj ki expected raftaar ({m.elapsed_pct}%) se peeche</p>
+                <p className="section-subtext">Behind today's expected pace ({m.elapsed_pct}%)</p>
               </div>
             </div>
             <div className="v2-people">
-              {data.attention.length === 0 && <p className="org-muted">Sab raftaar par hain 👍</p>}
+              {data.attention.length === 0 && <p className="org-muted">Everyone is on pace 👍</p>}
               {data.attention.map((p) => (
                 <div className="v2-person" key={`${p.username}-${p.team}`}>
                   <span className="v2-rank warn">!</span>
                   <div>
                     <strong>{p.username}</strong>
                     <small>
-                      {p.team} · baaqi {money(p.unit, Math.max(p.target - p.achieved, 0))}
+                      {p.team} · remaining {money(p.unit, Math.max(p.target - p.achieved, 0))}
                     </small>
                   </div>
                   <Bar pct={p.pct} expected={m.elapsed_pct} />
@@ -413,7 +413,7 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
             </div>
             {data.people_without_target > 0 && (
               <p className="org-muted" style={{ marginTop: 10 }}>
-                {data.people_without_target} log aise hain jin ka is mahine target set nahi.
+                {data.people_without_target} people have no target set this month.
               </p>
             )}
           </div>
@@ -425,16 +425,16 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
         <div className="card v2-follow v2-follow-today">
           <div className="section-head">
             <div>
-              <h2>Aaj ki visits</h2>
-              <p className="section-subtext">{data.visits_today.length} visit · is hafte {data.visits_this_week}</p>
+              <h2>Today's visits</h2>
+              <p className="section-subtext">{data.visits_today.length} today · {data.visits_this_week} this week</p>
             </div>
           </div>
           <div className="v2-follow-list">
             {data.visits_today.length === 0 && (
               <button className="v2-follow-item" onClick={() => onNavigate("visit")}>
                 <div>
-                  <strong>Abhi koi visit nahi</strong>
-                  <small>Visit log karne ke liye click karein</small>
+                  <strong>No visits yet</strong>
+                  <small>Click to log a visit</small>
                 </div>
                 <span className="v2-follow-when">+ Log</span>
               </button>
@@ -458,13 +458,13 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
             <div>
               <h2>Follow-ups</h2>
               <p className="section-subtext">
-                {data.followups.overdue} overdue · {data.followups.today} aaj
+                {data.followups.overdue} overdue · {data.followups.today} today
               </p>
             </div>
           </div>
           <div className="v2-follow-list">
             {[...data.followups.overdue_list, ...data.followups.today_list].length === 0 && (
-              <p className="org-muted">Koi pending follow-up nahi 🎉</p>
+              <p className="org-muted">No pending follow-ups 🎉</p>
             )}
             {data.followups.overdue_list.map((v) => (
               <button key={`o-${v.id}`} className="v2-follow-item" onClick={() => onOpenCustomer(v.client_name)}>
@@ -481,7 +481,7 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
                   <strong>{v.client_name}</strong>
                   <small>{v.sales_person}</small>
                 </div>
-                <span className="v2-follow-when">Aaj</span>
+                <span className="v2-follow-when">Today</span>
               </button>
             ))}
           </div>
@@ -491,16 +491,16 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
           <div className="section-head">
             <div>
               <h2>Customers at risk</h2>
-              <p className="section-subtext">Pichhle saal ke sab se bade jo is saal nahi aaye</p>
+              <p className="section-subtext">Last year's biggest customers with no purchases this year</p>
             </div>
           </div>
           <div className="v2-follow-list">
-            {data.at_risk.top.length === 0 && <p className="org-muted">Koi nahi 👍</p>}
+            {data.at_risk.top.length === 0 && <p className="org-muted">None 👍</p>}
             {data.at_risk.top.map((c) => (
               <button key={c.name} className="v2-follow-item" onClick={() => onOpenCustomer(c.name)}>
                 <div>
                   <strong>{c.name}</strong>
-                  <small>Pichhla saal: {fmt(c.last_year_qty)} qty</small>
+                  <small>Last year: {fmt(c.last_year_qty)} qty</small>
                 </div>
                 <span className="v2-follow-when">
                   <Contact size={12} /> 360
@@ -512,7 +512,7 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
       </div>
       {main && main.status === "behind" && !isMember && (
         <p className="org-muted" style={{ textAlign: "center" }}>
-          Tip: "Madad chahiye" wale logon ke saath aaj hi follow-up plan banayein.
+          Tip: Make a follow-up plan today with the people under "Needs attention".
         </p>
       )}
     </div>

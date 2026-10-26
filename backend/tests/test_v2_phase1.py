@@ -563,3 +563,13 @@ def test_home_progress_ignores_teams_without_target(client, admin, org):
     with_target = [t for t in body["teams"] if t["target"] and t["unit"] == "QTY"]
     assert qty["target"] == sum(t["target"] for t in with_target)
     assert qty["achieved"] == sum(t["achieved"] for t in with_target)
+
+
+# ============================================================ Round 3: notifications
+def test_notifications(client, org):
+    ali = login(client, "ali", "pass1234")
+    body = client.get("/api/v2/notifications", headers=ali).json()
+    kinds = {i["kind"] for i in body["items"]}
+    assert "overdue" in kinds and body["count"] >= 1
+    leader = client.get("/api/v2/notifications", headers=login(client, "saddam", "pass1234")).json()
+    assert "behind" in {i["kind"] for i in leader["items"]}

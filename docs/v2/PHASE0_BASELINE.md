@@ -1,6 +1,6 @@
 # RPL Sales V2 — Phase 0 Baseline (21 Oct 2026)
 
-Ye V1 code (`main`, commit `8df311e`) ka review hai. Iska maqsad V2 se pehle safe starting point lock karna hai.
+This is a review of the V1 code (`main`, commit `8df311e`). Its purpose is to lock in a safe starting point before V2.
 
 ## 1. Current system snapshot
 
