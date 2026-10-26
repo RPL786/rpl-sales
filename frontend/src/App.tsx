@@ -524,7 +524,7 @@ if (!authUser) {
   const [error, setError] = useState("");
   const [lastRefreshLabel, setLastRefreshLabel] = useState("");
 
-  // Everyone lands on their role's Home (Boss / Team Leader / "Mera Din")
+  // Everyone lands on their role's Home (Boss / Team Leader / "My Day")
   const [activeTab, setActiveTab] = useState<string>("home");
 
   useEffect(() => {
@@ -753,7 +753,7 @@ if (!authUser) {
       setError("");
       if (orgFilterActive && !selectedTeam && visibleTeams.length === 0) {
         applyDashboardData({ ...fallbackData });
-        setError("Is city/branch mein abhi koi team map nahi hui.");
+        setError("No teams are mapped to this city/branch yet.");
         return;
       }
       const q = dashboardQuery();
@@ -762,14 +762,14 @@ if (!authUser) {
       });
       applyDashboardData(result);
       if (result?.metadata?.empty_state) {
-        setError("Is selection ke liye abhi data available nahi hai.");
+        setError("No data is available for this selection yet.");
       }
     } catch (err: any) {
-      const message = err.message || "API connect nahi hui";
+      const message = err.message || "Could not connect to the API";
       if (message.toLowerCase().includes("at least 2 years")) {
-        setError("Comparison ke liye kam az kam 2 saal ka data chahiye.");
+        setError("Comparison requires at least 2 years of data.");
       } else if (message.toLowerCase().includes("no data found")) {
-        setError("Is selection ke liye abhi data available nahi hai.");
+        setError("No data is available for this selection yet.");
       } else {
         setError(message);
       }
@@ -1377,7 +1377,7 @@ const productSelectionLabel =
   const downloadClientDrilldownPdf = async () => {
     try {
       if (!filteredClientDrilldown.length) {
-        alert("PDF ke liye koi client data available nahi hai.");
+        alert("No client data is available for the PDF.");
         return;
       }
 
@@ -1447,14 +1447,14 @@ const productSelectionLabel =
       doc.save("client-drilldown-report.pdf");
     } catch (err: any) {
       console.error("Client PDF failed:", err);
-      alert(err?.message || "Client PDF generate nahi hui.");
+      alert(err?.message || "Could not generate the client PDF.");
     }
   };
 
   const downloadProductIntelligencePdf = async () => {
     try {
       if (!filteredProductDrilldown.length) {
-        alert("PDF ke liye koi product data available nahi hai.");
+        alert("No product data is available for the PDF.");
         return;
       }
 
@@ -1525,7 +1525,7 @@ const productSelectionLabel =
       doc.save("product-intelligence-report.pdf");
     } catch (err: any) {
       console.error("Product PDF failed:", err);
-      alert(err?.message || "Product PDF generate nahi hui.");
+      alert(err?.message || "Could not generate the product PDF.");
     }
   };
 
@@ -1838,7 +1838,7 @@ const productSelectionLabel =
           <div className="section-head">
             <div>
               <h2>Client Drilldown</h2>
-              <p className="section-subtext">Kaunsa client kis product me gira ya grow hua</p>
+              <p className="section-subtext">Which clients declined or grew in which products</p>
             </div>
             <span className="soft-counter">{filteredClientDrilldown.length} clients</span>
             <button
@@ -2214,7 +2214,7 @@ const productSelectionLabel =
         <div className="section-head">
           <div>
             <h2>Sales Person Performance Scorecard</h2>
-            <p className="section-subtext">Kaun growth la raha, kaun clients lose kar raha</p>
+            <p className="section-subtext">Who is driving growth and who is losing clients</p>
           </div>
         </div>
         <div className="scorecard-grid">
@@ -2330,7 +2330,7 @@ const productSelectionLabel =
         <div className="section-head">
           <div>
             <h2>Lost Client Recovery Panel</h2>
-            <p className="section-subtext">Direct action list: kin clients ko turant call karna chahiye</p>
+            <p className="section-subtext">Direct action list: clients to call right away</p>
           </div>
           <span className="soft-counter">{data.lost_client_recovery.length} total</span>
         </div>
@@ -2488,7 +2488,7 @@ const productSelectionLabel =
               <p className="eyebrow">RPL Sales · Version {APP_VERSION}</p>
               <h1>{activeTabLabel}</h1>
               <p className="subtext">
-                Sales Command Center — city, branch, team aur salesperson performance ek hi workspace mein.
+                Sales Command Center — city, branch, team and salesperson performance in one workspace.
               </p>
             </div>
             <div className="header-actions v2-header-actions">
@@ -2512,7 +2512,7 @@ const productSelectionLabel =
                         {
                           key: "backup",
                           label: "Download Backup",
-                          hint: "Saara data Excel mein",
+                          hint: "All data in Excel",
                           icon: <Download size={15} />,
                           onClick: async () => {
                             try {
@@ -2535,7 +2535,7 @@ const productSelectionLabel =
                       ]
                     : []),
                   ...(isAdmin || userRole === "dashboard_admin" || userRole === "super_user"
-                    ? [{ key: "entry", label: "Data Entry Form", hint: "Ek ek sale haath se", icon: <ClipboardList size={15} />, onClick: () => setActiveTab("dataEntry") }]
+                    ? [{ key: "entry", label: "Data Entry Form", hint: "Enter sales one by one", icon: <ClipboardList size={15} />, onClick: () => setActiveTab("dataEntry") }]
                     : []),
                 ]}
               />
@@ -2581,7 +2581,7 @@ const productSelectionLabel =
           <div className="section-head">
             <div>
               <h2>Filters</h2>
-              <p className="section-subtext">Sales screens par lagu hote hain</p>
+              <p className="section-subtext">Apply to the sales screens</p>
             </div>
             <div className="v2-rail-actions">
               <button className="ghost-btn" onClick={clearAllFilters} title="Reset filters">
@@ -2902,7 +2902,7 @@ const productSelectionLabel =
             {activeTab === "organization" && isAdmin && <OrgAdmin />}
             {activeTab === "multiYear" && canViewDashboards && (
               orgFilterActive && !selectedTeam && visibleTeams.length === 0 ? (
-                <div className="card"><p className="org-muted">Is city/branch mein abhi koi team map nahi hui.</p></div>
+                <div className="card"><p className="org-muted">No teams are mapped to this city/branch yet.</p></div>
               ) : (
                 <MultiYear
                   teams={selectedTeam ? [selectedTeam] : orgFilterActive ? visibleTeams.map((t) => t.name) : []}

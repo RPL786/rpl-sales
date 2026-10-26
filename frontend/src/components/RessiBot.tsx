@@ -26,7 +26,7 @@ export default function RessiBot({ apiBaseUrl }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "bot",
-      text: "Welcome to Ressichem. Main aapka AI database assistant hoon. Aap sales, visits, targets, clients, products ya team performance ke bare me pooch sakte hain.",
+      text: "Welcome to Ressichem. I am your AI database assistant. You can ask me about sales, visits, targets, clients, products or team performance.",
     },
   ]);
 
@@ -101,7 +101,7 @@ export default function RessiBot({ apiBaseUrl }: Props) {
 
       const answer =
         result.answer ||
-        "Database se clear jawab nahi mila. Sawal thora specific kar dein.";
+        "I could not find a clear answer in the database. Please make your question a bit more specific.";
 
       setMessages((prev) => [
         ...prev,
@@ -110,7 +110,7 @@ export default function RessiBot({ apiBaseUrl }: Props) {
 
       speak(answer);
     } catch (err: any) {
-      const errorText = err.message || "AI bot connect nahi hua.";
+      const errorText = err.message || "Could not connect to the AI bot.";
 
       setMessages((prev) => [
         ...prev,
@@ -128,7 +128,7 @@ export default function RessiBot({ apiBaseUrl }: Props) {
       window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      const msg = "Voice input is browser me supported nahi hai. Chrome use karein.";
+      const msg = "Voice input is not supported in this browser. Please use Chrome.";
       setMessages((prev) => [...prev, { role: "bot", text: msg }]);
       speak(msg);
       return;
@@ -157,7 +157,7 @@ export default function RessiBot({ apiBaseUrl }: Props) {
 
     recognition.onerror = () => {
       setListening(false);
-      const msg = "Voice sunne me problem hui. Dobara mic button dabayein.";
+      const msg = "There was a problem hearing your voice. Please press the mic button again.";
       setMessages((prev) => [...prev, { role: "bot", text: msg }]);
     };
 
@@ -233,7 +233,7 @@ export default function RessiBot({ apiBaseUrl }: Props) {
 
             {thinking && (
               <div className="ressi-msg bot">
-                Database check kar raha hoon...
+                Checking the database...
               </div>
             )}
 
@@ -256,7 +256,7 @@ export default function RessiBot({ apiBaseUrl }: Props) {
               onKeyDown={(e) => {
                 if (e.key === "Enter") askBot();
               }}
-              placeholder="Boss ka sawal likhein ya mic dabayein..."
+              placeholder="Type your question or press the mic..."
             />
 
             <button

@@ -132,7 +132,7 @@ export default function MultiYear({ teams, teamLabel, salesPerson, chart, toolti
             </h2>
             <p className="section-subtext">
               {teamLabel}
-              {salesPerson && salesPerson !== "all" ? ` · ${salesPerson}` : ""} — jitne saal ka data hai, sab khud aate hain
+              {salesPerson && salesPerson !== "all" ? ` · ${salesPerson}` : ""} — every year with data is included automatically
             </p>
           </div>
           <div className="v2-controls">
@@ -178,14 +178,14 @@ export default function MultiYear({ teams, teamLabel, salesPerson, chart, toolti
           <div className="info-banner" style={{ marginTop: 12 }}>
             <Info size={15} />
             {mode === "ytd"
-              ? `Fair comparison: har saal sirf ${data.cutoff.label} ka data compare ho raha hai (${data.cutoff.year} ka data yahan tak hai).${
+              ? `Fair comparison: each year is compared only for ${data.cutoff.label} (${data.cutoff.year} data runs up to this point).${
                   data.prorated_years.length
-                    ? ` ${data.prorated_years.join(", ")} ka ${data.cutoff.month} mahana upload tha, us ka hissa din ke hisaab se liya gaya.`
+                    ? ` ${data.prorated_years.join(", ")} had a monthly upload for ${data.cutoff.month}, so it was prorated by day.`
                     : ""
                 }`
               : data.latest_year_partial
-              ? `Note: ${data.cutoff.year} abhi poora nahi hua (data ${data.cutoff.label} tak). Barabar muqabla ke liye "Same period (YTD)" chunein.`
-              : "Poore saal ka muqabla."}
+              ? `Note: ${data.cutoff.year} is not complete yet (data up to ${data.cutoff.label}). Choose "Same period (YTD)" for a like-for-like comparison.`
+              : "Full-year comparison."}
           </div>
         )}
       </div>
@@ -198,7 +198,7 @@ export default function MultiYear({ teams, teamLabel, salesPerson, chart, toolti
       )}
       {data && data.years_available.length === 0 && (
         <div className="card">
-          <p className="org-muted">Is selection ke liye koi sales data nahi mila.</p>
+          <p className="org-muted">No sales data found for this selection.</p>
         </div>
       )}
 
@@ -239,7 +239,7 @@ export default function MultiYear({ teams, teamLabel, salesPerson, chart, toolti
             <div className="section-head">
               <div>
                 <h2>Month-wise {unit}</h2>
-                <p className="section-subtext">Har mahine ka saal-ba-saal muqabla</p>
+                <p className="section-subtext">Year-over-year comparison for each month</p>
               </div>
               <div className="v2-seg">
                 <button className={chartType === "bar" ? "active" : ""} onClick={() => setChartType("bar")}>

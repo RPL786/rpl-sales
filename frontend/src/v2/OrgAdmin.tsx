@@ -127,7 +127,7 @@ export default function OrgAdmin() {
   const addScope = (u: UserRow) => {
     const d = scopeDraft[u.id] ?? { scope_type: "branch", scope_id: "" };
     if (d.scope_type !== "org" && !d.scope_id) {
-      setMsg({ kind: "error", text: "Pehle scope target select karein" });
+      setMsg({ kind: "error", text: "Select a scope target first" });
       return;
     }
     const next: Scope = { scope_type: d.scope_type, scope_id: d.scope_type === "org" ? null : Number(d.scope_id) };
@@ -135,7 +135,7 @@ export default function OrgAdmin() {
   };
 
   const changeRole = (u: UserRow, role: string) =>
-    run(() => apiJson(`/api/v2/users/${u.id}/role`, { method: "PUT", body: JSON.stringify({ role }) }), `${u.username}: role updated (user ko dobara login karna hoga)`);
+    run(() => apiJson(`/api/v2/users/${u.id}/role`, { method: "PUT", body: JSON.stringify({ role }) }), `${u.username}: role updated (user must log in again)`);
 
   const scopeTargets = (type: Scope["scope_type"]) => {
     if (type === "city") return tree.cities.map((c) => ({ id: c.id, name: c.name }));
@@ -152,7 +152,7 @@ export default function OrgAdmin() {
             <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Building2 size={20} /> Organization Structure
             </h2>
-            <p className="section-subtext">City → Branch → Team. Team ko branch move karne se purani history change nahi hoti.</p>
+            <p className="section-subtext">City → Branch → Team. Moving a team to another branch does not change its past history.</p>
           </div>
           <button className="ghost-btn" onClick={loadAll} disabled={busy}>
             <RefreshCw size={14} /> Refresh
@@ -162,7 +162,7 @@ export default function OrgAdmin() {
 
         <div className="org-grid">
           <div>
-            {tree.cities.length === 0 && <p className="org-muted">Abhi koi city add nahi hui. Pehle Karachi, Lahore, Hub jaisi cities add karein.</p>}
+            {tree.cities.length === 0 && <p className="org-muted">No cities added yet. Start by adding cities such as Karachi, Lahore and Hub.</p>}
             {tree.cities.map((c) => (
               <div className="org-city" key={c.id} style={{ opacity: c.is_active ? 1 : 0.55 }}>
                 <div className="org-city-head">
@@ -171,7 +171,7 @@ export default function OrgAdmin() {
                   </strong>
                   <button className="ghost-btn" onClick={() => toggleCity(c)}>{c.is_active ? "Deactivate" : "Activate"}</button>
                 </div>
-                {c.branches.length === 0 && <p className="org-muted">Is city mein abhi koi branch nahi.</p>}
+                {c.branches.length === 0 && <p className="org-muted">No branches in this city yet.</p>}
                 {c.branches.map((b) => (
                   <div className="org-branch" key={b.id} style={{ opacity: b.is_active ? 1 : 0.55 }}>
                     <div className="org-branch-head">
@@ -217,7 +217,7 @@ export default function OrgAdmin() {
         <div className="section-head">
           <div>
             <h2>Team → Branch Mapping</h2>
-            <p className="section-subtext">Effective date se team naye branch mein jayegi; is date se pehle ka data purane branch mein rahega.</p>
+            <p className="section-subtext">The team moves to the new branch from the effective date; data before that date stays with the old branch.</p>
           </div>
         </div>
         <div className="table-wrap">
@@ -261,7 +261,7 @@ export default function OrgAdmin() {
             <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <ShieldCheck size={20} /> Roles &amp; Access Scope
             </h2>
-            <p className="section-subtext">Role = kya kar sakta hai. Scope = kahan (city / branch / team). Team Leader aur Member ko apni home team khud milti hai.</p>
+            <p className="section-subtext">Role = what a user can do. Scope = where (city / branch / team). Team Leaders and Members get their home team automatically.</p>
           </div>
         </div>
         <div className="table-wrap">
@@ -288,7 +288,7 @@ export default function OrgAdmin() {
                       {roleDef?.org_wide ? (
                         <span className="org-muted">Entire organization (role)</span>
                       ) : u.role === "user" ? (
-                        <span className="org-muted">Sirf apna record</span>
+                        <span className="org-muted">Own records only</span>
                       ) : (
                         <div className="org-scope-list">
                           {u.scopes.length === 0 && <span className="org-muted">None</span>}
@@ -336,7 +336,7 @@ export default function OrgAdmin() {
             <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <History size={20} /> Audit Trail
             </h2>
-            <p className="section-subtext">Structure, role, scope aur upload changes ka record.</p>
+            <p className="section-subtext">A record of structure, role, scope and upload changes.</p>
           </div>
         </div>
         <div className="table-wrap">

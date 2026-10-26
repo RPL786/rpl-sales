@@ -42,13 +42,13 @@ export default function LoginPage({ username, password, error, onChange, onSubmi
           Sales Command Center
           <span className="v2-version">v{APP_VERSION}</span>
         </h2>
-        <p>City, branch, team aur salesperson performance — ek hi jagah.</p>
+        <p>City, branch, team and salesperson performance — all in one place.</p>
         <ul className="v2-login-features">
           <li style={{ animationDelay: "0.35s" }}>
             <BarChart3 size={16} /> Multi-year sales intelligence
           </li>
           <li style={{ animationDelay: "0.45s" }}>
-            <MapPinned size={16} /> Karachi · Lahore · Hub — branch wise
+            <MapPinned size={16} /> Karachi · Lahore · Hub — branch by branch
           </li>
           <li style={{ animationDelay: "0.55s" }}>
             <ShieldCheck size={16} /> Role-based secure access
@@ -70,7 +70,7 @@ export default function LoginPage({ username, password, error, onChange, onSubmi
         </div>
 
         <h1>Welcome back</h1>
-        <p className="v2-login-sub">Apne account se login karein</p>
+        <p className="v2-login-sub">Sign in to your account</p>
 
         <label className="v2-field">
           <span>Username</span>

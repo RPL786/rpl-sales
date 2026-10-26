@@ -99,7 +99,7 @@ export default function ProductContributionTab() {
         <div>
           <h2>Product Contribution</h2>
           <p className="section-subtext">
-            Category-wise department sales, product-wise total sale, aur contribution percentage.
+            Category-wise department sales, product-wise total sales, and contribution percentage.
           </p>
         </div>
 

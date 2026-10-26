@@ -51,7 +51,7 @@ export default function ImportDialog({ teams, defaultTeam, onClose, onDone }: Pr
             <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <FileSpreadsheet size={20} /> Import Excel
             </h2>
-            <p className="section-subtext">Team chunein, tareeqa chunein, file lagayein</p>
+            <p className="section-subtext">Choose a team, choose a method, attach a file</p>
           </div>
           <button className="ghost-btn" onClick={onClose} aria-label="Close">
             <X size={16} />
@@ -61,7 +61,7 @@ export default function ImportDialog({ teams, defaultTeam, onClose, onDone }: Pr
         {result !== null ? (
           <div className="v2-modal-done">
             <CheckCircle2 size={44} />
-            <h3>{result} rows import ho gayi</h3>
+            <h3>{result} rows imported</h3>
             <p className="org-muted">Team: {team}</p>
             <button className="action-btn primary-btn" onClick={onClose}>
               Done
@@ -82,11 +82,11 @@ export default function ImportDialog({ teams, defaultTeam, onClose, onDone }: Pr
             </label>
 
             <div className="v2-field">
-              <span>2. Tareeqa</span>
+              <span>2. Method</span>
               <div className="v2-choice">
                 <button className={mode === "append" ? "active" : ""} onClick={() => setMode("append")}>
                   <strong>Add</strong>
-                  <small>Nayi rows purane data ke saath jod di jayengi</small>
+                  <small>New rows are added to the existing data</small>
                 </button>
                 <button
                   className={mode === "replace" ? "active danger" : ""}
@@ -96,13 +96,13 @@ export default function ImportDialog({ teams, defaultTeam, onClose, onDone }: Pr
                   }}
                 >
                   <strong>Replace</strong>
-                  <small>Is team ka saara purana data hata kar naya daalein</small>
+                  <small>Remove all of this team's existing data and load the new file</small>
                 </button>
               </div>
               {mode === "replace" && (
                 <label className="v2-check">
                   <input type="checkbox" checked={confirmReplace} onChange={(e) => setConfirmReplace(e.target.checked)} />
-                  Haan, <b>{team || "is team"}</b> ka purana sales data replace karna hai
+                  Yes, replace the existing sales data for <b>{team || "this team"}</b>
                 </label>
               )}
             </div>
@@ -111,7 +111,7 @@ export default function ImportDialog({ teams, defaultTeam, onClose, onDone }: Pr
               <span>3. Excel file</span>
               <div className={`v2-drop ${file ? "has-file" : ""}`}>
                 <Upload size={18} />
-                <span>{file ? file.name : "File chunein (.xlsx / .xls)"}</span>
+                <span>{file ? file.name : "Choose a file (.xlsx / .xls)"}</span>
                 <input type="file" accept=".xlsx,.xls" onChange={(e) => setFile(e.target.files?.[0] || null)} />
               </div>
             </label>
