@@ -781,7 +781,8 @@ def startup_create_schema():
     ensure_v2_schema()
     
 
-def load_database_data(team: str):
+def load_database_data(team):
+    """team: a team name, a list of team names (V2 multi-team view) or None for every team."""
     try:
         conn = get_db_connection()
     except Exception as exc:
@@ -798,9 +799,16 @@ def load_database_data(team: str):
                 month,
                 quantity
             FROM sales_entries
-            WHERE team = %s
         """
-        df_raw = pd.read_sql_query(query, conn, params=(team,))
+        if team is None:
+            df_raw = pd.read_sql_query(query, conn)
+        elif isinstance(team, (list, tuple, set)):
+            df_raw = pd.read_sql_query(
+                query + " WHERE LOWER(TRIM(team)) = ANY(%s)", conn,
+                params=([str(t).strip().lower() for t in team],),
+            )
+        else:
+            df_raw = pd.read_sql_query(query + " WHERE team = %s", conn, params=(team,))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to read database data: {str(exc)}") from exc
     finally:
@@ -2938,7 +2946,7 @@ def dashboard(user: dict = Depends(require_org_viewer)):
     return JSONResponse(content=get_dashboard_payload(), headers=headers)
 
 @app.get("/dashboard/db")
-def dashboard_from_db(team: str = "", user: dict = Depends(get_current_user)):
+def dashboard_from_db(team: str = "", teams: str = "", user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     try:
         cur = conn.cursor()
@@ -2948,9 +2956,30 @@ def dashboard_from_db(team: str = "", user: dict = Depends(get_current_user)):
         conn.close()
 
     # V2: role + scope check (user / team_leader keep V1 rule: own team only)
-    assert_team_allowed(resolve_access(user), (team or "").strip())
-    
+    db_access = resolve_access(user)
+    team = (team or "").strip()
+    assert_team_allowed(db_access, team)
+
+    # V2: no team chosen -> combined view of every team in scope (or of the city/branch filter)
+    load_target = team
+    view_label = team
     if not team:
+        requested = [t.strip() for t in (teams or "").split(",") if t.strip()]
+        for t in requested:
+            assert_team_allowed(db_access, t)
+        if requested:
+            load_target = requested
+            view_label = f"{len(requested)} teams"
+        elif db_access.org_wide:
+            load_target = None
+            view_label = "All teams"
+        else:
+            load_target = sorted(db_access.team_names or [])
+            view_label = "All my teams"
+        if load_target == []:
+            load_target = ""
+
+    if load_target == "":
         return {
             "summary": {
                 "current_year": None,
@@ -3006,7 +3035,7 @@ def dashboard_from_db(team: str = "", user: dict = Depends(get_current_user)):
         }
 
     try:
-        df_previous, df_current, previous_year, current_year = load_database_data(team)
+        df_previous, df_current, previous_year, current_year = load_database_data(load_target)
     except HTTPException as exc:
         if exc.status_code == 404:
             return {
@@ -3043,7 +3072,7 @@ def dashboard_from_db(team: str = "", user: dict = Depends(get_current_user)):
                 "client_drilldown": [],
                 "new_client_quality": [],
                 "executive_summary": {
-                    "headline": f"No data loaded for {team}",
+                    "headline": f"No data loaded for {view_label}",
                     "highlights": [],
                     "risks": [],
                     "opportunities": [],
@@ -3058,8 +3087,9 @@ def dashboard_from_db(team: str = "", user: dict = Depends(get_current_user)):
                 },
                 "metadata": {
                     "available_teams": available_teams,
-                    "source_file": f"database:{team}",
+                    "source_file": f"database:{view_label}",
                     "selected_team": team,
+                    "view_label": view_label,
                     "empty_state": True,
                 },
             }
@@ -3069,8 +3099,9 @@ def dashboard_from_db(team: str = "", user: dict = Depends(get_current_user)):
 
     metadata = payload.get("metadata", {}) or {}
     metadata["available_teams"] = available_teams
-    metadata["source_file"] = f"database:{team}"
+    metadata["source_file"] = f"database:{view_label}"
     metadata["selected_team"] = team
+    metadata["view_label"] = view_label
     payload["metadata"] = metadata
 
     return payload
@@ -3635,10 +3666,13 @@ def upload_to_db(
     )
 
 @app.post("/admin/clear-database")
-def clear_database(user: dict = Depends(get_current_user)):
+def clear_database(payload: dict = Body(default={}), user: dict = Depends(get_current_user)):
 
     if not resolve_access(user).can(V2_SYSTEM_ADMIN):
         raise HTTPException(status_code=403, detail="Super Admin access required")
+    # V2: destructive action needs the word DELETE typed by the admin
+    if str((payload or {}).get("confirm", "")).strip() != "DELETE":
+        raise HTTPException(status_code=400, detail='Confirmation required: type DELETE to clear the database')
 
     conn = get_db_connection()
     cur = conn.cursor()

@@ -53,12 +53,18 @@ const OrgAdmin = lazy(() => import("./v2/OrgAdmin"));
 const MultiYear = lazy(() => import("./v2/MultiYear"));
 const VisitPlanner = lazy(() => import("./v2/VisitPlanner"));
 const Customer360 = lazy(() => import("./v2/Customer360"));
+const ImportDialog = lazy(() => import("./v2/ImportDialog"));
+const DangerZone = lazy(() => import("./v2/DangerZone"));
+
+// Tabs that use the Global Filters (team / city / branch / salesperson / month / products)
+const FILTER_TABS = ["overview", "multiYear", "clients", "products", "team", "recovery", "executive"];
 import { useTheme } from "./v2/theme";
 import Sidebar, { APP_VERSION } from "./v2/Sidebar";
 import LoginPage from "./v2/LoginPage";
 import { chartColors } from "./v2/accent";
 import { apiJson } from "./v2/authFetch";
-import { ArrowUpRight, Building2, CalendarClock, Contact, Layers, MapPin } from "lucide-react";
+import { ArrowUpRight, Building2, CalendarClock, ClipboardList, Contact, Layers, MapPin, SlidersHorizontal } from "lucide-react";
+import ActionMenu from "./v2/ActionMenu";
 
 type ClientStatus = "new" | "lost" | "retained";
 type Severity = "high" | "medium" | "low";
@@ -513,15 +519,11 @@ if (!authUser) {
 
   const [data, setData] = useState<DashboardResponse>(fallbackData);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [lastRefreshLabel, setLastRefreshLabel] = useState("");
 
-  const [activeTab, setActiveTab] = useState(() => {
-    const user = JSON.parse(localStorage.getItem("auth_user") || "{}");
-    if (user?.role === "admin") return "admin";
-    return canViewDashboards ? "overview" : "visit";
-  });
+  // Managers land on the sales overview, field staff on their Visit Planner
+  const [activeTab, setActiveTab] = useState(() => (canViewDashboards ? "overview" : "planner"));
 
   useEffect(() => {
     if ((activeTab === "admin" || activeTab === "organization") && authUser?.role !== "admin") {
@@ -539,9 +541,16 @@ if (!authUser) {
     stored?.selectedProducts ?? []
   );
   const [displayUnit, setDisplayUnit] = useState<"bag" | "kg">(stored?.displayUnit ?? "bag");
-  const [dataSource, setDataSource] = useState<"excel" | "database">(
-    isScopedManager ? "database" : stored?.dataSource ?? "excel"
-  );
+  // V2: the dashboard always reads the database; Excel is only a way to import data
+  const dataSource = "database" as const;
+  const [importOpen, setImportOpen] = useState(false);
+  const [filtersCollapsed, setFiltersCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("rpl-filters-collapsed") === "1";
+    } catch {
+      return false;
+    }
+  });
   const [selectedTeam, setSelectedTeam] = useState("");
   const [masterTeams, setMasterTeams] = useState<{ id: number; name: string }[]>([]);
   const [orgCities, setOrgCities] = useState<OrgTreeCity[]>([]);
@@ -612,6 +621,14 @@ if (!authUser) {
   );
   const orgFilterActive = selectedCityId !== "all" || selectedBranchId !== "all";
   const visibleTeams = orgFilterActive ? masterTeams.filter((t) => teamIdsInFilter.has(t.id)) : masterTeams;
+  const showFilterRail = canViewDashboards && FILTER_TABS.includes(activeTab) && !filtersCollapsed;
+  const scopeLabel = selectedTeam
+    ? selectedTeam
+    : orgFilterActive
+    ? `${visibleTeams.length} teams`
+    : canViewAllTeams
+    ? "All teams"
+    : "All my teams";
 
   useEffect(() => {
     const payload = {
@@ -674,7 +691,6 @@ if (!authUser) {
     setFocusedScorecard(null);
     setPagination({ clientPage: 1, productPage: 1, recoveryPage: 1 });
     setDisplayUnit("bag");
-    setDataSource(isScopedManager ? "database" : "excel");
     setSelectedTeam("");
     setSelectedCityId("all");
     setSelectedBranchId("all");
@@ -718,203 +734,38 @@ if (!authUser) {
     }
   };
 
+  const dashboardQuery = () => {
+    if (selectedTeam) return `team=${encodeURIComponent(selectedTeam)}`;
+    if (orgFilterActive) return `teams=${encodeURIComponent(visibleTeams.map((t) => t.name).join(","))}`;
+    return "";
+  };
+
   const loadDashboard = async () => {
     try {
       setLoading(true);
       setError("");
-
-      if (dataSource === "database" && !selectedTeam) {
-        const result = await fetchJson(`${API_BASE_URL}/dashboard/db?_ts=${Date.now()}`, {
-          cache: "no-store",
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-          },
-        });
-
-        applyDashboardData(result);
+      if (orgFilterActive && !selectedTeam && visibleTeams.length === 0) {
+        applyDashboardData({ ...fallbackData });
+        setError("Is city/branch mein abhi koi team map nahi hui.");
         return;
       }
-
-      const url =
-        dataSource === "excel"
-          ? `${API_BASE_URL}/dashboard?_ts=${Date.now()}`
-          : `${API_BASE_URL}/dashboard/db?team=${encodeURIComponent(selectedTeam)}&_ts=${Date.now()}`;
-
-      const result = await fetchJson(url, {
+      const q = dashboardQuery();
+      const result = await fetchJson(`${API_BASE_URL}/dashboard/db?${q ? `${q}&` : ""}_ts=${Date.now()}`, {
         cache: "no-store",
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-        },
       });
-
       applyDashboardData(result);
-
-      if (dataSource === "excel" && result?.metadata?.empty_state) {
-        setError("Excel file upload karo taake dashboard load ho jaye.");
-      }
-
-      if (dataSource === "database" && result?.metadata?.empty_state) {
-        setError("Is team ke liye abhi data available nahi hai.");
+      if (result?.metadata?.empty_state) {
+        setError("Is selection ke liye abhi data available nahi hai.");
       }
     } catch (err: any) {
       const message = err.message || "API connect nahi hui";
-
-      if (message.toLowerCase().includes("upload file first")) {
-        setError("Excel file upload karo taake dashboard load ho jaye.");
-      } else if (message.toLowerCase().includes("no data found for team")) {
-        setError("Is team ke liye abhi data available nahi hai.");
+      if (message.toLowerCase().includes("at least 2 years")) {
+        setError("Comparison ke liye kam az kam 2 saal ka data chahiye.");
+      } else if (message.toLowerCase().includes("no data found")) {
+        setError("Is selection ke liye abhi data available nahi hai.");
       } else {
         setError(message);
       }
-    } finally {
-      setLoading(false);
-    }
-  };    
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event.target.files?.[0];
-    if (!selectedFile) return;
-
-    if (!selectedTeam) {
-      alert("Please first select team");
-      event.target.value = "";
-      return;
-    }
-
-    try {
-      setUploading(true);
-      setError("");
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-
-      const result = await fetchJson(`${API_BASE_URL}/upload`, {
-        method: "POST",
-        body: formData,
-      });
-
-      applyDashboardData(result.dashboard ?? {});
-      resetUiState();
-    } catch (err: any) {
-      setError(err.message || "File upload failed");
-    } finally {
-      setUploading(false);
-      event.target.value = "";
-    }
-  };
-
-  const handleDatabaseUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event.target.files?.[0];
-    if (!selectedFile) return;
-
-    if (!selectedTeam) {
-      alert("Please select team first from Global Filters");
-      event.target.value = "";
-      return;
-    }
-
-    try {
-      setUploading(true);
-      setError("");
-
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-
-      const replaceData = window.confirm(
-        "OK = Replace Existing Team Data\nCancel = Append New Data"
-      );
-
-      const uploadMode = replaceData ? "replace" : "append";      
-      const result = await fetchJson(
-        `${API_BASE_URL}/data/upload?team=${encodeURIComponent(selectedTeam)}&mode=${uploadMode}`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );      
-     
-      alert(`Uploaded ${result.inserted_rows || 0} rows successfully`);
-      setDataSource("database");
-      await loadDashboard();
-    } catch (err: any) {
-      alert(err.message || "Database upload failed");
-    } finally {
-      setUploading(false);
-      event.target.value = "";
-    }
-  };
-
-  const handleClearDashboard = async () => {
-    const confirmed = window.confirm(
-      "Are you sure you want to clear the uploaded file and reset the dashboard?"
-    );
-    if (!confirmed) return;
-
-    try {
-      setLoading(true);
-      setError("");
-
-      await fetchJson(`${API_BASE_URL}/reset`, {
-        method: "POST",
-      });
-
-      const clearedData: DashboardResponse = {
-        ...fallbackData,
-        metadata: {
-          source_file: undefined,
-          last_processed_at: new Date().toISOString(),
-          cache_used: false,
-          ai_enabled: data.metadata?.ai_enabled ?? false,
-          ai_provider: data.metadata?.ai_provider ?? "fallback",
-        },
-      };
-
-      setData(clearedData);
-
-      setClientStatusFilter("all");
-      setSelectedSalesPerson("all");
-      setSelectedProducts([]);
-      setProductSearch("");
-      setSelectedMonth("all");
-      setViewMode("compare");
-      setYearScope("ytd");
-      setClientSearch("");
-      setFocusedClient(null);
-      setFocusedProduct(null);
-      setFocusedScorecard(null);
-      setPagination({ clientPage: 1, productPage: 1, recoveryPage: 1 });
-      setLastRefreshLabel("");
-
-      localStorage.removeItem(STORAGE_KEY);
-    } catch (err: any) {
-      setError(err.message || "Dashboard reset failed");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleClearDatabase = async () => {
-    const confirmed = window.confirm(
-      "WARNING: Ye database ka sara saved data delete kar dega. Continue?"
-    );
-
-    if (!confirmed) return;
-
-    try {
-      setLoading(true);
-
-      await fetchJson(`${API_BASE_URL}/admin/clear-database`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-        },               
-      });
-
-      alert("Database successfully cleared");
-
-      window.location.reload();
-    } catch (err: any) {
-      alert(err.message || "Database clear failed");
     } finally {
       setLoading(false);
     }
@@ -924,7 +775,16 @@ if (!authUser) {
     setLoading(false);
     if (!canViewDashboards) return; // members/leaders only use Field Operations
     loadDashboard();
-  }, [dataSource, selectedTeam]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTeam, selectedCityId, selectedBranchId, masterTeams.length]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("rpl-filters-collapsed", filtersCollapsed ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [filtersCollapsed]);
 
   useEffect(() => {
     loadMasterTeams();
@@ -1391,6 +1251,23 @@ const productSelectionLabel =
 
   const activeFilterChips = useMemo(() => {
     const chips: { key: string; label: string; onClear: () => void }[] = [];
+    if (selectedCityId !== "all") {
+      chips.push({
+        key: "city",
+        label: `City: ${orgCities.find((c) => String(c.id) === selectedCityId)?.name ?? selectedCityId}`,
+        onClear: () => {
+          setSelectedCityId("all");
+          setSelectedBranchId("all");
+        },
+      });
+    }
+    if (selectedBranchId !== "all") {
+      const b = orgCities.flatMap((c) => c.branches).find((x) => String(x.id) === selectedBranchId);
+      chips.push({ key: "branch", label: `Branch: ${b?.name ?? selectedBranchId}`, onClear: () => setSelectedBranchId("all") });
+    }
+    if (selectedTeam) {
+      chips.push({ key: "team", label: `Team: ${selectedTeam}`, onClear: () => setSelectedTeam("") });
+    }
     if (selectedSalesPerson !== "all") {
       chips.push({
         key: "sales",
@@ -1435,6 +1312,10 @@ const productSelectionLabel =
     }
     return chips;
   }, [
+    selectedCityId,
+    selectedBranchId,
+    selectedTeam,
+    orgCities,
     selectedSalesPerson,
     clientStatusFilter,
     selectedMonth,
@@ -2603,136 +2484,60 @@ const productSelectionLabel =
                 Sales Command Center — city, branch, team aur salesperson performance ek hi workspace mein.
               </p>
             </div>
-            <div className="header-actions">
-              <input
-                id="db-upload-input"
-                type="file"
-                accept=".xlsx,.xls"
-                onChange={handleDatabaseUpload}
-                style={{ display: "none" }}
-              />            
-              {authUser?.role === "admin" && (
-                <>
-              <label
-                className="action-btn upload-btn"
-                style={{ cursor: dataSource === "database" ? "not-allowed" : "pointer", opacity: dataSource === "database" ? 0.6 : 1 }}
-              >
-                <Upload size={16} />
-                {dataSource === "database"
-                  ? "Database Mode"
-                  : uploading
-                  ? "Uploading..."
-                  : "Upload Excel"}
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  onChange={handleFileUpload}
-                  style={{ display: "none" }}
-                  disabled={dataSource === "database"}
-                />
-              </label>
-
-              <button className="action-btn" onClick={() => setActiveTab("dataEntry")}>
-                Data Entry Form
-              </button>
-
-              <button
-                className="action-btn"
-                onClick={() => {
-                  if (!selectedTeam) {
-                    alert("Please first select team");
-                    return;
-                  }
-
-                  document.getElementById("db-upload-input")?.click();
-                }}
-                disabled={uploading}
-              >
-                <Upload size={16} />
-                {uploading ? "Uploading DB..." : "Upload DB Excel"}
-              </button>
-
-              <button className="action-btn" onClick={loadDashboard}>
-                <RefreshCw size={16} />
-                Refresh
-              </button>
-
-              <button className="action-btn" onClick={handleClearDashboard}>
-                Clear File
-              </button>
-
-              <button
-                className="action-btn"
-                onClick={handleClearDatabase}
-                style={{ background: "#dc2626", color: "white" }}
-              >
-                Clear Database
-              </button>
-
-              <button
-                className="action-btn primary-btn"
-                onClick={async () => {
-                  try {
-                    const response = await fetch(
-                      `${API_BASE_URL}/admin/download-backup`,
-                      {
-                        headers: {
-                          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-                        },
-                      }
-                    );
-
-                    if (!response.ok) {
-                      throw new Error("Download failed");
-                    }
-
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = "sales_backup.xlsx";
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-
-                    window.URL.revokeObjectURL(url);
-                  } catch (err: any) {
-                    alert(err.message || "Backup download failed");
-                  }
-                }}
-              >
-                Download Backup
-              </button>
-
-              <button className="action-btn primary-btn" onClick={exportPdf}>
-                <Download size={16} />
-                Executive PDF
-              </button>
-                </>
-              )}
-
-              {userRole === "dashboard_admin" && (
-                <button
-                  className="action-btn"
-                  onClick={() => {
-                    if (!selectedTeam) {
-                      alert("Please first select team");
-                      return;
-                    }
-                    document.getElementById("db-upload-input")?.click();
-                  }}
-                  disabled={uploading}
-                >
-                  <Upload size={16} />
-                  {uploading ? "Uploading DB..." : "Upload DB Excel"}
+            <div className="header-actions v2-header-actions">
+              {(isAdmin || userRole === "dashboard_admin") && (
+                <button className="action-btn primary-btn" onClick={() => setImportOpen(true)}>
+                  <Upload size={16} /> Import Excel
                 </button>
               )}
+              {canViewDashboards && FILTER_TABS.includes(activeTab) && (
+                <button className="action-btn" onClick={loadDashboard} disabled={loading}>
+                  <RefreshCw size={16} className={loading ? "v2-spin" : undefined} /> Refresh
+                </button>
+              )}
+              <ActionMenu
+                items={[
+                  ...(canViewDashboards
+                    ? [{ key: "pdf", label: "Executive PDF", hint: "Print / save as PDF", icon: <Download size={15} />, onClick: exportPdf }]
+                    : []),
+                  ...(isAdmin
+                    ? [
+                        {
+                          key: "backup",
+                          label: "Download Backup",
+                          hint: "Saara data Excel mein",
+                          icon: <Download size={15} />,
+                          onClick: async () => {
+                            try {
+                              const response = await fetch(`${API_BASE_URL}/admin/download-backup`);
+                              if (!response.ok) throw new Error("Download failed");
+                              const blob = await response.blob();
+                              const url = window.URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download = `sales_backup_${new Date().toISOString().slice(0, 10)}.xlsx`;
+                              document.body.appendChild(a);
+                              a.click();
+                              a.remove();
+                              window.URL.revokeObjectURL(url);
+                            } catch (err: any) {
+                              alert(err.message || "Backup download failed");
+                            }
+                          },
+                        },
+                      ]
+                    : []),
+                  ...(isAdmin || userRole === "dashboard_admin" || userRole === "super_user"
+                    ? [{ key: "entry", label: "Data Entry Form", hint: "Ek ek sale haath se", icon: <ClipboardList size={15} />, onClick: () => setActiveTab("dataEntry") }]
+                    : []),
+                ]}
+              />
             </div>
           </div>
 
 
           <div className="hero-row">
+            {canViewDashboards && FILTER_TABS.includes(activeTab) && (
             <div className="hero-strip">
               <div className={`hero-pill ${s.growth < 0 ? "tone-negative" : "tone-positive"}`}>
                 {s.growth < 0 ? <TrendingDown size={16} /> : <TrendingUp size={16} />}
@@ -2758,22 +2563,27 @@ const productSelectionLabel =
                 <span>{lastRefreshLabel ? `Last refresh: ${lastRefreshLabel}` : "Not refreshed yet"}</span>
               </div>
             </div>
+            )}
 
           </div>
         </div>
        
-        <div className="dashboard-body" style={{ gridTemplateColumns: canViewDashboards ? undefined : "1fr" }}>
-          <div className="left-rail" style={{ display: canViewDashboards ? undefined : "none" }}>
+        <div className="dashboard-body" style={{ gridTemplateColumns: showFilterRail ? undefined : "1fr" }}>
+          <div className="left-rail" style={{ display: showFilterRail ? undefined : "none" }}>
             <div className="card filter-shell">
           <div className="section-head">
             <div>
-              <h2>Global Filters</h2>
-              <p className="section-subtext">Filters stay global across all tabs</p>
+              <h2>Filters</h2>
+              <p className="section-subtext">Sales screens par lagu hote hain</p>
             </div>
-            <button className="ghost-btn" onClick={clearAllFilters}>
-              <X size={14} />
-              Reset Filters
-            </button>
+            <div className="v2-rail-actions">
+              <button className="ghost-btn" onClick={clearAllFilters} title="Reset filters">
+                <X size={14} /> Reset
+              </button>
+              <button className="ghost-btn" onClick={() => setFiltersCollapsed(true)} title="Hide filters" aria-label="Hide filters">
+                <SlidersHorizontal size={14} />
+              </button>
+            </div>
           </div>
           
 
@@ -2860,32 +2670,6 @@ const productSelectionLabel =
               </select>
             </div>
 
-            {/*
-            <div className="filter-block">
-              <label>Data Source</label>
-              <select
-                value={dataSource}
-                onChange={(e) => setDataSource(e.target.value as "excel" | "database")}
-                className="filter-select"
-              >
-                <option value="excel">Excel Upload</option>
-                <option value="database">Database</option>
-              </select>
-            </div>
-            */}
-
-            <div className="filter-block">
-              <label><Briefcase size={14} /> Data Source</label>
-              <select
-                value={dataSource}
-                onChange={(e) => setDataSource(e.target.value as "excel" | "database")}
-                className="filter-select"
-              >
-                <option value="excel" disabled={isScopedManager}>Excel Upload</option>
-                <option value="database">Database</option>
-              </select>
-            </div>
-            
             <div className="filter-block">
               <label><BarChart3 size={14} /> Top N</label>
               <select value={topN} onChange={(e) => setTopN(Number(e.target.value))} className="filter-select">
@@ -2939,7 +2723,7 @@ const productSelectionLabel =
                   onChange={(e) => setSelectedTeam(e.target.value)}
                   className="filter-select"
                 >
-                  <option value="">Select Team</option>
+                  <option value="">{orgFilterActive ? `All teams here (${visibleTeams.length})` : "All teams"}</option>
                   {visibleTeams.map((team) => (
                     <option key={team.id} value={team.name}>
                       {team.name}
@@ -3072,7 +2856,24 @@ const productSelectionLabel =
         
         </div>
 
-        <div className="right-panel" style={{ width: canViewDashboards ? undefined : "100%" }}>
+        <div className="right-panel" style={{ width: showFilterRail ? undefined : "100%" }}>
+          {canViewDashboards && FILTER_TABS.includes(activeTab) && filtersCollapsed && (
+            <div className="v2-filterbar">
+              <button className="action-btn" onClick={() => setFiltersCollapsed(false)}>
+                <SlidersHorizontal size={15} /> Filters
+                {activeFilterChips.length > 0 && <span className="v2-badge">{activeFilterChips.length}</span>}
+              </button>
+              <span className="v2-filterbar-scope">{scopeLabel}</span>
+              {activeFilterChips.map((chip) => (
+                <button key={chip.key} className="filter-chip" onClick={chip.onClear}>
+                  <span>{chip.label}</span>
+                  <X size={13} />
+                </button>
+              ))}
+              {loading && <span className="org-muted">Loading…</span>}
+              {!loading && error && <span className="v2-filterbar-error">{error}</span>}
+            </div>
+          )}
           <Suspense fallback={<TabFallback />}>
           <div className="tab-content v2-page-enter" key={activeTab}>
             {activeTab === "overview" && renderOverviewTab()}
@@ -3085,7 +2886,12 @@ const productSelectionLabel =
             {activeTab === "dataEntry" && <DataEntry />}
             {activeTab === "forecast" && <ForecastTab />}
             {activeTab === "productContribution" && <ProductContributionTab />}
-            {activeTab === "admin" && isAdmin && <AdminPanel />}
+            {activeTab === "admin" && isAdmin && (
+              <>
+                <AdminPanel />
+                <DangerZone />
+              </>
+            )}
             {activeTab === "organization" && isAdmin && <OrgAdmin />}
             {activeTab === "multiYear" && canViewDashboards && (
               orgFilterActive && !selectedTeam && visibleTeams.length === 0 ? (
@@ -3118,6 +2924,20 @@ const productSelectionLabel =
           </Suspense>
         </div>
       </div>
+
+        {importOpen && (
+          <Suspense fallback={null}>
+            <ImportDialog
+              teams={masterTeams.map((t) => t.name)}
+              defaultTeam={selectedTeam}
+              onClose={() => setImportOpen(false)}
+              onDone={() => {
+                loadMasterTeams();
+                loadDashboard();
+              }}
+            />
+          </Suspense>
+        )}
 
         {(isAdmin || isSuperUser) && (
           <Suspense fallback={null}>
