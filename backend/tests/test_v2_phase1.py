@@ -597,7 +597,7 @@ def test_data_health_merge_and_duplicates(client, admin, org):
                                                     "quantity": 1})
     h = client.get("/api/v2/data-health", headers=admin).json()
     keys = {g["key"] for g in h["products"]["groups"]}
-    assert "waterguard49116kg" in keys and "zepoxyclearfull" in keys
+    assert "waterguard491_16kg" in keys and "zepoxyclearfull" in keys
     assert h["duplicate_lines"]["extra_lines"] >= 1
     assert any(g["key"] == "dupco" for g in h["clients"]["groups"])
 
@@ -622,3 +622,38 @@ def test_data_health_merge_and_duplicates(client, admin, org):
     assert rep["overall_total_qty"] == 467.5
     after = client.get("/api/v2/data-health", headers=admin).json()
     assert after["duplicate_lines"]["extra_lines"] == 0
+
+
+def test_name_key_keeps_pack_sizes_apart():
+    from v2.datahealth import name_key
+    assert name_key("ZEPOXY TABLE TOP DEEP POUR 1.5 KG") == name_key("Zepoxy Table Top Deep Pour 1.5KG")
+    assert name_key("ZEPOXY TABLE TOP DEEP POUR 1.5 KG") != name_key("ZEPOXY TABLE TOP DEEP POUR 15 KG")
+    assert name_key("Pack 1.50 kg") == name_key("pack 1.5kg")
+    assert name_key("WATER GUARD 491 16 KG") != name_key("WATER GUARD 4911 6 KG")
+    assert name_key("WATER GUARD 491 16 KG") == name_key("Water-Guard 491 16kg")
+
+
+def test_data_health_pack_sizes_and_ignore(client, admin, org):
+    for name, qty in (("ZEPOXY TABLE TOP DEEP POUR 15 KG", 720), ("ZEPOXY TABLE TOP DEEP POUR 1.5 KG", 84),
+                      ("ZEPOXY TABLE TOP DEEP POUR 1.5KG", 13.95)):
+        client.post("/data/entry", headers=admin, json={"team": "Dup Team", "sales_person": "X", "client_name": "Pack Co",
+                                                        "product": name, "entry_date": "2026-10-08", "quantity": qty})
+    h = client.get("/api/v2/data-health", headers=admin).json()
+    groups = [g for g in h["products"]["groups"] if g["key"].startswith("zepoxytabletopdeeppour")]
+    assert len(groups) == 1
+    assert {s["name"] for s in groups[0]["spellings"]} == {"ZEPOXY TABLE TOP DEEP POUR 1.5 KG",
+                                                            "ZEPOXY TABLE TOP DEEP POUR 1.5KG"}
+    bad = client.post("/api/v2/data-health/merge", headers=admin,
+                      json={"kind": "product", "canonical": "ZEPOXY TABLE TOP DEEP POUR 15 KG",
+                            "variants": ["ZEPOXY TABLE TOP DEEP POUR 1.5 KG"]})
+    assert bad.status_code == 400
+
+    boss = login(client, "boss", "pass1234")
+    assert client.post("/api/v2/data-health/ignore", headers=boss,
+                       json={"kind": "product", "key": groups[0]["key"]}).status_code == 403
+    assert client.post("/api/v2/data-health/ignore", headers=admin,
+                       json={"kind": "product", "key": groups[0]["key"]}).status_code == 200
+    h = client.get("/api/v2/data-health", headers=admin).json()
+    assert not any(g["key"] == groups[0]["key"] for g in h["products"]["groups"])
+    assert h["ignored"]["product"] == 1
+    assert client.post("/api/v2/data-health/ignore/reset", headers=admin).json()["removed"] == 1

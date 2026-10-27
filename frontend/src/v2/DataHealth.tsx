@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Copy, Loader2, Merge, Package, RefreshCw, ShieldCheck, Trash2, Users } from "lucide-react";
+import { CheckCircle2, Copy, EyeOff, Loader2, Merge, Package, RefreshCw, ShieldCheck, Trash2, Users } from "lucide-react";
 import { apiJson } from "./authFetch";
 
 type Spelling = { name: string; lines: number; qty: number };
@@ -17,6 +17,7 @@ type DupLine = {
 type Health = {
   products: { groups: Group[]; count: number };
   clients: { groups: Group[]; count: number };
+  ignored?: { product: number; client: number };
   duplicate_lines: { groups: number; extra_lines: number; extra_qty: number; sample: DupLine[] };
 };
 
@@ -45,6 +46,19 @@ function VariantGroups({
         body: JSON.stringify({ kind, canonical, variants: g.spellings.map((s) => s.name).filter((n) => n !== canonical) }),
       });
       onMerged(`Merged into "${canonical}" — ${r.sales_lines_updated} sales lines and ${r.visits_updated} visits updated.`);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const notSame = async (g: Group) => {
+    setBusy(g.key);
+    setError("");
+    try {
+      await apiJson("/api/v2/data-health/ignore", { method: "POST", body: JSON.stringify({ kind, key: g.key }) });
+      onMerged(`Marked as different ${kind === "product" ? "products" : "customers"} — hidden from this list.`);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -88,6 +102,9 @@ function VariantGroups({
             </div>
             <button className="action-btn primary-btn" disabled={!!busy} onClick={() => merge(g)}>
               {busy === g.key ? <Loader2 size={15} className="v2-spin" /> : <Merge size={15} />} Keep selected, merge others
+            </button>
+            <button className="ghost-btn" disabled={!!busy} onClick={() => notSame(g)} title="These are different items — stop showing them">
+              <EyeOff size={14} /> Not the same
             </button>
           </div>
         );
@@ -133,6 +150,17 @@ export default function DataHealth() {
     }
   };
 
+  const resetIgnored = async () => {
+    setError("");
+    try {
+      const r = await apiJson<{ removed: number }>("/api/v2/data-health/ignore/reset", { method: "POST" });
+      done(`${r.removed} hidden group${r.removed === 1 ? "" : "s"} shown again.`);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const hiddenCount = (data?.ignored?.product || 0) + (data?.ignored?.client || 0);
   const d = data?.duplicate_lines;
   return (
     <div className="v2-stack">
@@ -199,7 +227,10 @@ export default function DataHealth() {
             <div className="section-head">
               <div>
                 <h2>Product names</h2>
-                <p className="section-subtext">Pick the correct spelling; all sales and visits move to it and the extra names are removed.</p>
+                <p className="section-subtext">
+                  Pick the correct spelling; all sales and visits move to it and the extra names are removed. Pack sizes are kept
+                  apart (1.5 KG never matches 15 KG). If a group is really different items, click "Not the same".
+                </p>
               </div>
             </div>
             <VariantGroups kind="product" groups={data.products.groups} onMerged={done} />
@@ -214,6 +245,15 @@ export default function DataHealth() {
             </div>
             <VariantGroups kind="client" groups={data.clients.groups} onMerged={done} />
           </div>
+
+          {hiddenCount > 0 && (
+            <p className="org-muted">
+              {hiddenCount} group{hiddenCount === 1 ? "" : "s"} marked "Not the same" are hidden.{" "}
+              <button className="ghost-btn" onClick={resetIgnored}>
+                Show them again
+              </button>
+            </p>
+          )}
 
           <div className="card">
             <div className="section-head">

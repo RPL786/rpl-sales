@@ -96,6 +96,15 @@ DDL = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_audit_events_time ON audit_events (occurred_at DESC)",
+    # --- Data Health: groups an admin marked as "not the same" ------------------
+    """
+    CREATE TABLE IF NOT EXISTS data_health_ignored (
+        kind TEXT NOT NULL CHECK (kind IN ('product', 'client')),
+        name_key TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (kind, name_key)
+    )
+    """,
 ]
 
 
