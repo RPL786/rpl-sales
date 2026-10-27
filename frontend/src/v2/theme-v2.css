@@ -1576,3 +1576,32 @@ html[data-theme="day"] .v2-status.tone-warm { color: #b45309; }
   .v2-shell .v2-header-actions .action-btn { min-height: 38px; }
   .v2-shell .v2-header-actions .primary-btn { display: none; }
 }
+
+/* Data Health */
+.v2-dh-ok { display: flex; align-items: center; gap: 8px; }
+.v2-dh-ok svg { color: #22c55e; }
+.v2-dh-groups { display: grid; gap: 12px; }
+.v2-dh-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(127, 127, 140, 0.05);
+}
+.v2-dh-spellings { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
+.v2-dh-spelling {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+.v2-dh-spelling.active { border-color: rgba(var(--accent-rgb), 0.7); background: rgba(var(--accent-rgb), 0.10); }
+.v2-dh-spelling small { display: block; color: var(--muted); font-size: 11.5px; }
+.v2-dh-spelling input { accent-color: var(--accent); }

@@ -72,6 +72,8 @@ from v2.analytics import router as v2_analytics_router
 app.include_router(v2_analytics_router)
 from v2.home import router as v2_home_router
 app.include_router(v2_home_router)
+from v2.datahealth import router as v2_datahealth_router
+app.include_router(v2_datahealth_router)
 
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
@@ -2713,8 +2715,14 @@ def product_contribution_report(
                 COALESCE(SUM(s.quantity), 0) AS total_qty,
                 COALESCE(SUM(s.amount), 0) AS total_amount
             FROM sales_entries s
-            LEFT JOIN products p
-                ON LOWER(TRIM(p.name)) = LOWER(TRIM(s.product))
+            LEFT JOIN (
+                -- one row per product name: spelling/case variants in the product list
+                -- must never multiply sales (this caused 2x totals)
+                SELECT LOWER(TRIM(name)) AS name_key, MAX(NULLIF(TRIM(category), '')) AS category
+                FROM products
+                GROUP BY LOWER(TRIM(name))
+            ) p
+                ON p.name_key = LOWER(TRIM(s.product))
             WHERE {where_sql}
               AND COALESCE(TRIM(s.product), '') <> ''
             GROUP BY 1, 2
@@ -2734,8 +2742,14 @@ def product_contribution_report(
                 COALESCE(SUM(s.quantity), 0) AS team_qty,
                 COALESCE(SUM(s.amount), 0) AS team_amount
             FROM sales_entries s
-            LEFT JOIN products p
-                ON LOWER(TRIM(p.name)) = LOWER(TRIM(s.product))
+            LEFT JOIN (
+                -- one row per product name: spelling/case variants in the product list
+                -- must never multiply sales (this caused 2x totals)
+                SELECT LOWER(TRIM(name)) AS name_key, MAX(NULLIF(TRIM(category), '')) AS category
+                FROM products
+                GROUP BY LOWER(TRIM(name))
+            ) p
+                ON p.name_key = LOWER(TRIM(s.product))
             WHERE {where_sql}
               AND COALESCE(TRIM(s.product), '') <> ''
               AND COALESCE(TRIM(s.team), '') <> ''
