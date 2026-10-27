@@ -17,6 +17,7 @@ import {
   UserRoundX,
 } from "lucide-react";
 import { apiJson } from "./authFetch";
+import TodayList, { type TodayItem } from "./TodayList";
 
 type Progress = {
   unit: "QTY" | "AMOUNT";
@@ -66,6 +67,7 @@ type Props = {
   canViewDashboards: boolean;
   onNavigate: (tab: string) => void;
   onOpenCustomer: (name: string) => void;
+  onStartVisit?: (item: TodayItem) => void;
 };
 
 const fmt = (v: number) => new Intl.NumberFormat().format(Math.round(v || 0));
@@ -143,7 +145,7 @@ function Bar({ pct, expected }: { pct: number | null; expected: number }) {
   );
 }
 
-export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer }: Props) {
+export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer, onStartVisit }: Props) {
   const [data, setData] = useState<Home | null>(null);
   const [error, setError] = useState("");
   const [tick, setTick] = useState(0);
@@ -213,6 +215,11 @@ export default function HomePage({ canViewDashboards, onNavigate, onOpenCustomer
           <div style={{ width: `${m.elapsed_pct}%` }} />
         </div>
       </div>
+
+      {/* Who to visit today (salespeople and team leaders) */}
+      {(isMember || data.kind === "leader") && onStartVisit && (
+        <TodayList canPickPerson={!isMember} onStartVisit={onStartVisit} onOpenCustomer={onOpenCustomer} />
+      )}
 
       {/* Target progress */}
       {data.progress.length === 0 ? (

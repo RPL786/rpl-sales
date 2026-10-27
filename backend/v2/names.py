@@ -27,7 +27,8 @@ def canonical_map(cur, kind: str, names: Iterable[str]) -> Dict[str, str]:
         return {}
     table, sales_col = _TABLES[kind]
     # names in the master list and names already used on sales lines
-    cur.execute(f"SELECT name FROM {table} UNION SELECT DISTINCT {sales_col} FROM sales_entries")
+    extra = " UNION SELECT DISTINCT client_name FROM visit_entries" if kind == "client" else ""
+    cur.execute(f"SELECT name FROM {table} UNION SELECT DISTINCT {sales_col} FROM sales_entries{extra}")
     by_key: Dict[str, list] = {}
     for (existing,) in cur.fetchall():
         if existing and existing.strip():
@@ -89,8 +90,13 @@ def match_name(kind: str = Query(..., pattern="^(product|client)$"), name: str =
     if not name:
         return {"name": name, "saved_as": name, "is_new": False, "changed": False}
     with transaction() as cur:
-        table, _ = _TABLES[kind]
         saved_as = canonical(cur, kind, name)
-        cur.execute(f"SELECT 1 FROM {table} WHERE name = %s", (saved_as,))
+        table, sales_col = _TABLES[kind]
+        cur.execute(
+            f"SELECT 1 FROM {table} WHERE name = %s UNION ALL SELECT 1 FROM sales_entries WHERE {sales_col} = %s"
+            + (" UNION ALL SELECT 1 FROM visit_entries WHERE client_name = %s" if kind == "client" else "")
+            + " LIMIT 1",
+            (saved_as, saved_as, saved_as) if kind == "client" else (saved_as, saved_as),
+        )
         exists = cur.fetchone() is not None
     return {"name": name, "saved_as": saved_as, "is_new": not exists, "changed": saved_as != name}

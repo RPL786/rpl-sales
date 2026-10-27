@@ -1663,3 +1663,33 @@ html[data-theme="day"] .v2-name-hint.existing { color: #047857; }
 .v2-voice-langs button.active { background: var(--accent); color: #fff; }
 .v2-voice-err { color: #f87171; font-size: 12px; }
 @media (prefers-reduced-motion: reduce) { .v2-voice-btn.on { animation: none; } }
+
+/* ---- Today's list ---------------------------------------------------------- */
+.v2-today { display: grid; gap: 12px; }
+.v2-today-progress { height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.v2-today-progress > div { height: 100%; background: linear-gradient(90deg, var(--accent), #22c55e); transition: width 0.4s ease; }
+.v2-today-list { display: grid; gap: 8px; }
+.v2-today-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border-radius: 14px; border: 1px solid var(--line);
+  border-left: 4px solid var(--line);
+}
+.v2-today-item.kind-overdue { border-left-color: #ef4444; }
+.v2-today-item.kind-followup, .v2-today-item.kind-planned { border-left-color: var(--accent); }
+.v2-today-item.kind-quiet { border-left-color: #a78bfa; }
+.v2-today-item.done { opacity: 0.55; border-left-color: #22c55e; }
+.v2-today-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: rgba(var(--accent-rgb, 249, 115, 22), 0.12); color: var(--accent); flex: none; }
+.v2-today-item.kind-overdue .v2-today-icon { background: rgba(239, 68, 68, 0.12); color: #ef4444; }
+.v2-today-item.kind-quiet .v2-today-icon { background: rgba(167, 139, 250, 0.14); color: #a78bfa; }
+.v2-today-item.done .v2-today-icon { background: rgba(34, 197, 94, 0.14); color: #22c55e; }
+.v2-today-main { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.v2-today-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-today-main small { color: var(--muted, #94a3b8); }
+.v2-today-reason { font-weight: 600; color: inherit; }
+.v2-today-item.kind-overdue .v2-today-reason { color: #ef4444; }
+.v2-today-actions { display: flex; gap: 6px; align-items: center; flex: none; }
+.v2-today-actions .action-btn { padding: 7px 12px; }
+@media (max-width: 640px) {
+  .v2-today-item { flex-wrap: wrap; }
+  .v2-today-actions { width: 100%; justify-content: flex-end; }
+}
