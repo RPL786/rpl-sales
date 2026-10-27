@@ -798,3 +798,17 @@ def test_monthly_workbook_import_and_check(client, admin):
     assert b["mode"] == "monthly_excel" and b["inserted_rows"] == 2
     assert b["check"]["file_qty"] == 17.5 and b["check"]["saved_qty"] == 14.5 and b["check"]["skipped_rows"] == 1
     assert b["date_from"] == "2025-01-01" and b["date_to"] == "2025-03-01"
+
+
+def test_boss_agent_health_and_errors(client, monkeypatch):
+    monkeypatch.delenv("BOSS_AGENT_KEY", raising=False)
+    h = client.get("/api/boss-agent/health").json()
+    assert h["status"] == "problem" and not h["boss_agent_key_configured"] and h["database"] == "ok"
+    r = client.post("/api/boss-agent", json={"question": "total sales"}, headers={"x-boss-agent-key": "x"})
+    assert r.status_code == 500 and "BOSS_AGENT_KEY" in r.json()["detail"]
+    monkeypatch.setenv("BOSS_AGENT_KEY", "k1")
+    h = client.get("/api/boss-agent/health", headers={"x-boss-agent-key": "k1"}).json()
+    assert h["status"] == "ok" and h["key_matches"] and "k1" not in str(h)
+    assert client.get("/api/boss-agent/health", headers={"x-boss-agent-key": "bad"}).json()["status"] == "problem"
+    r = client.post("/api/boss-agent", json={"question": "total sales 2026"}, headers={"x-boss-agent-key": "k1"})
+    assert r.status_code == 200

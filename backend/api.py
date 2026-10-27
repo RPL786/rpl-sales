@@ -4322,12 +4322,62 @@ def get_salespersons(x_boss_agent_key: str = Header(default="")):
         cur.close()
         conn.close()
 
+@app.get("/api/boss-agent/health")
+def boss_agent_health(x_boss_agent_key: str = Header(default="")):
+    """Connection check for external agents (e.g. Mustaqeem). Open it in a browser:
+    it shows whether the agent key is set on the server and whether the database answers.
+    It never shows the key itself."""
+    expected_key = os.getenv("BOSS_AGENT_KEY", "").strip()
+    out = {
+        "app": "RPL Sales",
+        "version": "2.0",
+        "boss_agent_key_configured": bool(expected_key),
+        "key_sent": bool(x_boss_agent_key),
+        "key_matches": bool(expected_key) and x_boss_agent_key.strip() == expected_key,
+    }
+    try:
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM sales_entries")
+            out["database"] = "ok"
+            out["sales_lines"] = int(cur.fetchone()[0])
+        finally:
+            conn.close()
+    except Exception as exc:
+        out["database"] = f"error: {str(exc)[:200]}"
+    problems = []
+    if not out["boss_agent_key_configured"]:
+        problems.append("BOSS_AGENT_KEY is missing in the server environment (Portainer > container > Env)")
+    if out["database"] != "ok":
+        problems.append("Database is not reachable")
+    if out["key_sent"] and not out["key_matches"]:
+        problems.append("The agent's key does not match BOSS_AGENT_KEY on the server")
+    out["status"] = "ok" if not problems else "problem"
+    out["problems"] = problems
+    return out
+
+
 @app.post("/api/boss-agent")
 def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default="")):
+    try:
+        return _boss_agent(payload, x_boss_agent_key)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+
+        print("BOSS AGENT ERROR:", repr(exc), flush=True)
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Boss agent failed: {type(exc).__name__}: {str(exc)[:300]}") from exc
+
+
+def _boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = ""):
     expected_key = os.getenv("BOSS_AGENT_KEY", "").strip()
 
     if not expected_key:
-        raise HTTPException(status_code=500, detail="BOSS_AGENT_KEY is not configured")
+        print("BOSS AGENT ERROR: BOSS_AGENT_KEY is not set in the server environment", flush=True)
+        raise HTTPException(status_code=500, detail="BOSS_AGENT_KEY is not configured on the server")
 
     if x_boss_agent_key != expected_key:
         raise HTTPException(status_code=401, detail="Invalid boss agent key")
