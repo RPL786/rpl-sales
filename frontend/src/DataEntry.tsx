@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import NameHint from "./v2/NameHint";
 
 const API_BASE_URL = "";
 
@@ -350,7 +351,8 @@ export default function DataEntry() {
               });
 
               if (res.ok) {
-                setForm({ ...form, client_name: newClientName });
+                const body = await res.json().catch(() => ({}));
+                setForm({ ...form, client_name: body?.name || newClientName });
                 setNewClientName("");
                 loadTeamOptions(canViewAllTeams ? form.team : authUser?.team || "");
               }
@@ -359,6 +361,7 @@ export default function DataEntry() {
             Add Client
           </button>
         </div>
+        <NameHint kind="client" name={newClientName} onUse={(n) => { setForm({ ...form, client_name: n }); setNewClientName(""); }} />
 
         <select
           className="filter-select"
