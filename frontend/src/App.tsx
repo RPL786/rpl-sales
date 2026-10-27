@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { VisitPrefill } from "./v2/QuickVisit";
 import {
   AlertCircle,
   BarChart3,
@@ -552,6 +553,7 @@ if (!authUser) {
   const dataSource = "database" as const;
   const [importOpen, setImportOpen] = useState(false);
   const [installable, setInstallable] = useState(() => canInstall() && !isStandalone());
+  const [visitPrefill, setVisitPrefill] = useState<VisitPrefill | null>(null);
   const [visitMode, setVisitMode] = useState<"quick" | "grid">(() => {
     try {
       const saved = localStorage.getItem("rpl-visit-mode");
@@ -2939,7 +2941,7 @@ const productSelectionLabel =
                   </span>
                 </div>
                 {visitMode === "quick" ? (
-                  <QuickVisit canChooseOwner={isAdmin || userRole === "dashboard_admin"} />
+                  <QuickVisit canChooseOwner={isAdmin || userRole === "dashboard_admin"} prefill={visitPrefill} />
                 ) : (
                   <VisitForm />
                 )}
@@ -2974,6 +2976,18 @@ const productSelectionLabel =
               <HomePage
                 canViewDashboards={canViewDashboards}
                 onNavigate={(tab) => setActiveTab(tab)}
+                onStartVisit={(it) => {
+                  setVisitPrefill({
+                    key: Date.now(),
+                    client_name: it.client_name,
+                    product: it.product,
+                    team: it.team,
+                    sales_person: it.sales_person,
+                    followUp: it.kind !== "quiet",
+                  });
+                  setVisitMode("quick");
+                  setActiveTab("visit");
+                }}
                 onOpenCustomer={(name) => {
                   setCustomerFocus(name);
                   setActiveTab("customers");

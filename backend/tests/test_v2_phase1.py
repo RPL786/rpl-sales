@@ -812,3 +812,78 @@ def test_boss_agent_health_and_errors(client, monkeypatch):
     assert client.get("/api/boss-agent/health", headers={"x-boss-agent-key": "bad"}).json()["status"] == "problem"
     r = client.post("/api/boss-agent", json={"question": "total sales 2026"}, headers={"x-boss-agent-key": "k1"})
     assert r.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Today's list + Boss morning report
+# ---------------------------------------------------------------------------
+
+def test_today_list_and_morning_report(client, admin, org, monkeypatch):
+    from datetime import timedelta
+    from v2.analytics import _today
+    today = _today()
+    iso = lambda d: d.isoformat()
+    # a regular customer of "ali" who went quiet (3 months of purchases, last one 60 days ago)
+    for days in (200, 120, 60):
+        raw_sale("Tile Adhesive", "ali", "Quiet Hardware", "TA-100", iso(today - timedelta(days=days)), 50)
+    # a one-off customer: not "regular", must not appear
+    raw_sale("Tile Adhesive", "ali", "One Time Co", "TA-100", iso(today - timedelta(days=90)), 500)
+    # yesterday's sale for the morning report
+    raw_sale("Tile Adhesive", "ali", "Fresh Buyer", "TA-100", iso(today - timedelta(days=1)), 25, 2500)
+
+    ali = login(client, "ali", "pass1234")
+    base = {"team": "Tile Adhesive", "sales_person": "ali", "client_category": "", "product": "TA-100",
+            "meeting_time": "11:00", "meeting_type": "Initial Visit", "meeting_status": "Interested",
+            "client_response": "", "notes": "call back"}
+    for client_name, met, nxt in [("Late Follow Co", today - timedelta(days=10), today - timedelta(days=3)),
+                                  ("Due Today Co", today - timedelta(days=5), today)]:
+        r = client.post("/api/visit-entry", headers=ali,
+                        json={**base, "client_name": client_name, "meeting_date": iso(met), "next_meeting_date": iso(nxt)})
+        assert r.status_code == 200, r.text
+
+    t = client.get("/api/v2/today", headers=ali).json()
+    kinds = {i["client_name"]: i["kind"] for i in t["items"]}
+    assert kinds.get("Late Follow Co") == "overdue"
+    assert kinds.get("Due Today Co") == "followup"
+    assert kinds.get("Quiet Hardware") == "quiet"
+    assert "One Time Co" not in kinds
+    order = [i["kind"] for i in t["items"]]
+    assert order.index("followup") > max(k for k, x in enumerate(order) if x == "overdue")
+    assert order.index("quiet") > order.index("followup")
+    assert t["summary"]["open"] == len(t["items"])
+
+    # visiting today marks it done
+    r = client.post("/api/visit-entry", headers=ali,
+                    json={**base, "client_name": "Quiet Hardware", "meeting_date": iso(today), "next_meeting_date": ""})
+    assert r.status_code == 200
+    t = client.get("/api/v2/today", headers=ali).json()
+    q = next(i for i in t["items"] if i["client_name"] == "Quiet Hardware")
+    assert q["done"] and t["items"][-1]["done"]
+
+    # a member only ever sees their own list
+    other = client.get("/api/v2/today?sales_person=AHMED", headers=ali).json()
+    assert other["sales_person"] == "ali"
+    # leader of the team sees ali's items; Lahore-only coordinator would not
+    leader = login(client, "saddam", "pass1234")
+    lt = client.get("/api/v2/today?sales_person=ali", headers=leader).json()
+    assert any(i["client_name"] == "Late Follow Co" for i in lt["items"])
+
+    # morning report via the agent key
+    monkeypatch.setenv("BOSS_AGENT_KEY", "k2")
+    assert client.get("/api/boss-agent/morning-report").status_code == 401
+    r = client.get("/api/boss-agent/morning-report", headers={"x-boss-agent-key": "k2"})
+    assert r.status_code == 200, r.text
+    rep = r.json()["data"]
+    assert rep["yesterday_sales"]["qty"] >= 25
+    assert any(c["client_name"] == "Quiet Hardware" for c in rep["quiet_customers"]) or rep["quiet_customers"]
+    assert "Morning report" in r.json()["answer"] and "Yesterday" in r.json()["answer"]
+    a = client.post("/api/boss-agent", headers={"x-boss-agent-key": "k2"}, json={"question": "send the morning report"})
+    assert a.status_code == 200 and a.json()["data"]["type"] == "morning_report"
+    assert client.get("/api/boss-agent/morning-report?date=bad", headers={"x-boss-agent-key": "k2"}).status_code == 400
+
+
+def test_name_match_knows_visit_only_customers(client, admin):
+    m = client.get("/api/v2/names/match?kind=client&name=Late Follow Co", headers=admin).json()
+    assert not m["is_new"] and not m["changed"]
+    m = client.get("/api/v2/names/match?kind=client&name=late follow co.", headers=admin).json()
+    assert m["saved_as"] == "Late Follow Co" and m["changed"]

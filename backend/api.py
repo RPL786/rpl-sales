@@ -75,12 +75,15 @@ app.include_router(v2_home_router)
 from v2.datahealth import router as v2_datahealth_router
 from v2 import imports as v2_imports
 from v2 import names as v2_names
+from v2.today import build_morning_report as v2_build_morning_report
+from v2.today import router as v2_today_router
 from v2.names import router as v2_names_router
 from v2.imports import router as v2_imports_router
 from v2.db import transaction as v2_transaction
 app.include_router(v2_datahealth_router)
 app.include_router(v2_imports_router)
 app.include_router(v2_names_router)
+app.include_router(v2_today_router)
 
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
@@ -4358,6 +4361,25 @@ def boss_agent_health(x_boss_agent_key: str = Header(default="")):
     return out
 
 
+@app.get("/api/boss-agent/morning-report")
+def boss_agent_morning_report(x_boss_agent_key: str = Header(default=""), date: str = ""):
+    """Ready-to-send morning report for the Boss (the agent fetches it at 8 AM).
+    Optional ?date=YYYY-MM-DD to rebuild the report for another day."""
+    expected_key = os.getenv("BOSS_AGENT_KEY", "").strip()
+    if not expected_key:
+        raise HTTPException(status_code=500, detail="BOSS_AGENT_KEY is not configured on the server")
+    if x_boss_agent_key.strip() != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid boss agent key")
+    report_day = None
+    if date:
+        try:
+            report_day = datetime.strptime(date.strip(), "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    report = v2_build_morning_report(report_day)
+    return {"answer": report["text"], "data": report}
+
+
 @app.post("/api/boss-agent")
 def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default="")):
     try:
@@ -4389,6 +4411,11 @@ def _boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = ""):
         raise HTTPException(status_code=400, detail="Question is required")
 
     q_lower = question.lower()
+
+    # V2: "morning report" / "daily briefing" returns the Boss morning report
+    if any(w in q_lower for w in ["morning report", "daily report", "daily briefing", "morning briefing", "subah ki report"]):
+        report = v2_build_morning_report()
+        return {"answer": report["text"], "data": {"type": "morning_report", **report}}
 
     # Roman Urdu keywords (input detection only; replies are always English)
     roman_words = [

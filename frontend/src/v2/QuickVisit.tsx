@@ -16,9 +16,19 @@ import { OfflineError, enqueueVisit, flushQueue, postVisit, readQueue } from "./
 import NameHint from "./NameHint";
 import VoiceButton from "./VoiceButton";
 
+export type VisitPrefill = {
+  key: number;
+  client_name: string;
+  product?: string;
+  team?: string;
+  sales_person?: string;
+  followUp?: boolean;
+};
+
 type Props = {
   canChooseOwner: boolean;
   onSaved?: () => void;
+  prefill?: VisitPrefill | null;
 };
 
 const MEETING_TYPES = ["Initial Visit", "Follow-up", "Closing", "Future Scheduled"];
@@ -84,8 +94,22 @@ const fresh = (keep?: Partial<Form>): Form => ({
 });
 
 /** One visit at a time, big touch targets, works offline. */
-export default function QuickVisit({ canChooseOwner, onSaved }: Props) {
+export default function QuickVisit({ canChooseOwner, onSaved, prefill }: Props) {
   const [form, setForm] = useState<Form>(() => fresh());
+
+  // opened from "Today's list": start the visit with the customer already filled in
+  useEffect(() => {
+    if (!prefill) return;
+    setForm((f) => ({
+      ...fresh(f),
+      client_name: prefill.client_name,
+      product: prefill.product || f.product,
+      team: canChooseOwner ? prefill.team || f.team : f.team,
+      sales_person: canChooseOwner ? prefill.sales_person || f.sales_person : f.sales_person,
+      meeting_type: prefill.followUp ? "Follow-up" : "Initial Visit",
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill?.key]);
   const [products, setProducts] = useState<string[]>([]);
   const [teams, setTeams] = useState<string[]>([]);
   const [hits, setHits] = useState<{ name: string; has_sales: boolean }[]>([]);
