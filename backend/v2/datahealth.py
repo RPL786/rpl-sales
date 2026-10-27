@@ -24,9 +24,37 @@ from .permissions import MANAGE_ORG, SYSTEM_ADMIN, Access, require_cap
 router = APIRouter(prefix="/api/v2/data-health", tags=["v2-data-health"])
 
 
+_TOKEN = re.compile(r"\d+(?:\.\d+)?|[a-z]+")
+
+
+def _num(tok: str) -> str:
+    # "1.50" -> "1.5", "015" -> "15"; keeps the decimal point so 1.5 KG never matches 15 KG
+    if "." in tok:
+        whole, frac = tok.split(".", 1)
+        frac = frac.rstrip("0")
+        whole = whole.lstrip("0") or "0"
+        return f"{whole}.{frac}" if frac else whole
+    return tok.lstrip("0") or "0"
+
+
 def name_key(value: str) -> str:
-    """Letters and digits only, lower case: '16 KG', '16kg' and '16-Kg' all match."""
-    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+    """Spelling-insensitive key for a product / customer name.
+
+    Case, spaces and punctuation are ignored ('16 KG', '16kg', '16-Kg' match), but numbers
+    stay exact: '1.5 KG' and '15 KG' are different packs, and '491 16 KG' never matches
+    '4911 6 KG'.
+    """
+    out: List[str] = []
+    prev_num = False
+    for tok in _TOKEN.findall(str(value or "").lower()):
+        is_num = tok[0].isdigit()
+        if is_num:
+            tok = _num(tok)
+            if prev_num:
+                out.append("_")
+        out.append(tok)
+        prev_num = is_num
+    return "".join(out)
 
 
 def _variants(rows) -> List[Dict]:
@@ -53,9 +81,18 @@ def _variants(rows) -> List[Dict]:
     return out
 
 
+def _ignored(cur) -> Dict[str, set]:
+    cur.execute("SELECT kind, name_key FROM data_health_ignored")
+    out: Dict[str, set] = {"product": set(), "client": set()}
+    for kind, key in cur.fetchall():
+        out.setdefault(kind, set()).add(key)
+    return out
+
+
 @router.get("")
 def data_health(access: Access = Depends(require_cap(MANAGE_ORG))):
     with transaction() as cur:
+        ignored = _ignored(cur)
         # product spellings from sales and from the product list (list-only rows count 0 lines)
         cur.execute(
             """
@@ -67,7 +104,7 @@ def data_health(access: Access = Depends(require_cap(MANAGE_ORG))):
             ) x GROUP BY name
             """
         )
-        product_groups = _variants(cur.fetchall())
+        product_groups = [g for g in _variants(cur.fetchall()) if g["key"] not in ignored["product"]]
 
         cur.execute(
             """
@@ -79,7 +116,7 @@ def data_health(access: Access = Depends(require_cap(MANAGE_ORG))):
             ) x GROUP BY name
             """
         )
-        client_groups = _variants(cur.fetchall())
+        client_groups = [g for g in _variants(cur.fetchall()) if g["key"] not in ignored["client"]]
 
         cur.execute(
             """
@@ -98,6 +135,7 @@ def data_health(access: Access = Depends(require_cap(MANAGE_ORG))):
     return {
         "products": {"groups": product_groups[:100], "count": len(product_groups)},
         "clients": {"groups": client_groups[:100], "count": len(client_groups)},
+        "ignored": {"product": len(ignored["product"]), "client": len(ignored["client"])},
         "duplicate_lines": {
             "groups": len(dups),
             "extra_lines": extra_lines,
@@ -154,6 +192,35 @@ def merge_names(payload: MergeIn, access: Access = Depends(require_cap(SYSTEM_AD
         audit.record(cur, access, f"data.merge_{payload.kind}", payload.kind, canonical,
                      {"variants": variants, "sales_lines": sales, "visits": visits})
     return {"status": "ok", "sales_lines_updated": sales, "visits_updated": visits}
+
+
+class IgnoreIn(BaseModel):
+    kind: Literal["product", "client"]
+    key: str
+
+
+@router.post("/ignore")
+def ignore_group(payload: IgnoreIn, access: Access = Depends(require_cap(SYSTEM_ADMIN))):
+    """Mark a group as 'not the same' so it stops showing up."""
+    key = (payload.key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Missing group")
+    with transaction() as cur:
+        cur.execute(
+            "INSERT INTO data_health_ignored (kind, name_key) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (payload.kind, key),
+        )
+        audit.record(cur, access, f"data.ignore_{payload.kind}", payload.kind, key, {})
+    return {"status": "ok"}
+
+
+@router.post("/ignore/reset")
+def reset_ignored(access: Access = Depends(require_cap(SYSTEM_ADMIN))):
+    with transaction() as cur:
+        cur.execute("DELETE FROM data_health_ignored")
+        removed = cur.rowcount
+        audit.record(cur, access, "data.ignore_reset", "data_health_ignored", None, {"removed": removed})
+    return {"status": "ok", "removed": removed}
 
 
 class ConfirmIn(BaseModel):
