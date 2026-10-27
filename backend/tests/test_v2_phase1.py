@@ -33,6 +33,24 @@ def _reset_db():
     conn.close()
 
 
+def _raw_sql(sql, params=()):
+    """Write straight to the DB (to create old-style data the API no longer allows)."""
+    conn = psycopg2.connect(host=os.getenv("POSTGRES_HOST"), port=os.getenv("POSTGRES_PORT"),
+                            database=os.getenv("POSTGRES_DB"), user=os.getenv("POSTGRES_USER"),
+                            password=os.getenv("POSTGRES_PASSWORD"))
+    with conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+    conn.close()
+
+
+def raw_sale(team, person, client_name, product, date, qty, amount=0):
+    _raw_sql("""INSERT INTO sales_entries (team, sales_person, client_name, client_category, product, year, month,
+                quantity, amount, entry_date) VALUES (%s,%s,%s,'',%s,%s,%s,%s,%s,%s)""",
+             (team, person, client_name, product, int(date[:4]),
+              ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][int(date[5:7]) - 1],
+              qty, amount, date))
+
+
 _reset_db()
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -267,7 +285,7 @@ def test_theme_preference_persists(client, org):
 def test_audit_trail_records_changes(client, admin, org):
     events = client.get("/api/v2/audit", headers=admin).json()["events"]
     actions = {e["action"] for e in events}
-    assert {"city.create", "branch.create", "team.branch_change", "user.scopes_set", "sales.upload"} <= actions
+    assert {"city.create", "branch.create", "team.branch_change", "user.scopes_set"} <= actions
 
 
 def test_schema_migration_is_idempotent(client):
@@ -581,7 +599,9 @@ def test_product_report_not_doubled_by_name_variants(client, admin, org):
     client.post("/data/entry", headers=admin, json={"team": "Dup Team", "sales_person": "X", "client_name": "Dup Co",
                                                     "product": "WATER GUARD 491 16 KG", "entry_date": "2026-10-05",
                                                     "quantity": 2016})
-    client.post("/api/products", json={"name": "Water Guard 491 16 kg"}, headers=admin)
+    # an old-style second spelling in the product list (the API now refuses to create it)
+    assert client.post("/api/products", json={"name": "Water Guard 491 16 kg"}, headers=admin).status_code == 409
+    _raw_sql("INSERT INTO products (name) VALUES ('Water Guard 491 16 kg')")
     r = client.get("/api/product-contribution-report?year=2026&team=Dup Team", headers=admin).json()
     assert r["overall_total_qty"] == 2016
 
@@ -589,12 +609,8 @@ def test_product_report_not_doubled_by_name_variants(client, admin, org):
 def test_data_health_merge_and_duplicates(client, admin, org):
     # same line imported twice + a spelling variant in sales
     for _ in range(2):
-        client.post("/data/entry", headers=admin, json={"team": "Dup Team", "sales_person": "X", "client_name": "Dup Co",
-                                                        "product": "ZEPOXY Clear FULL", "entry_date": "2026-10-06",
-                                                        "quantity": 466.5})
-    client.post("/data/entry", headers=admin, json={"team": "Dup Team", "sales_person": "X", "client_name": "dup co.",
-                                                    "product": "Zepoxy clear full", "entry_date": "2026-10-07",
-                                                    "quantity": 1})
+        raw_sale("Dup Team", "X", "Dup Co", "ZEPOXY Clear FULL", "2026-10-06", 466.5)
+    raw_sale("Dup Team", "X", "dup co.", "Zepoxy clear full", "2026-10-07", 1)
     h = client.get("/api/v2/data-health", headers=admin).json()
     keys = {g["key"] for g in h["products"]["groups"]}
     assert "waterguard491_16kg" in keys and "zepoxyclearfull" in keys
@@ -636,8 +652,7 @@ def test_name_key_keeps_pack_sizes_apart():
 def test_data_health_pack_sizes_and_ignore(client, admin, org):
     for name, qty in (("ZEPOXY TABLE TOP DEEP POUR 15 KG", 720), ("ZEPOXY TABLE TOP DEEP POUR 1.5 KG", 84),
                       ("ZEPOXY TABLE TOP DEEP POUR 1.5KG", 13.95)):
-        client.post("/data/entry", headers=admin, json={"team": "Dup Team", "sales_person": "X", "client_name": "Pack Co",
-                                                        "product": name, "entry_date": "2026-10-08", "quantity": qty})
+        raw_sale("Dup Team", "X", "Pack Co", name, "2026-10-08", qty)
     h = client.get("/api/v2/data-health", headers=admin).json()
     groups = [g for g in h["products"]["groups"] if g["key"].startswith("zepoxytabletopdeeppour")]
     assert len(groups) == 1
@@ -657,3 +672,143 @@ def test_data_health_pack_sizes_and_ignore(client, admin, org):
     assert not any(g["key"] == groups[0]["key"] for g in h["products"]["groups"])
     assert h["ignored"]["product"] == 1
     assert client.post("/api/v2/data-health/ignore/reset", headers=admin).json()["removed"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Safer import (repeat warning, totals check, undo) and consistent names
+# ---------------------------------------------------------------------------
+
+def _datewise_xlsx(rows):
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sales"
+    ws.append(["Sales Person", "Client Name", "Product", "Date", "Quantity", "Amount"])
+    for r in rows:
+        ws.append(list(r))
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_import_repeat_warning_check_and_undo(client, admin):
+    client.post("/api/teams", json={"name": "Import Team"}, headers=admin)
+    raw_sale("Import Team", "Ali", "Old Customer", "ZEPOXY TABLE TOP DEEP POUR 1.5 KG", "2026-01-05", 1)
+    content = _datewise_xlsx([
+        ("Ali", "Alpha Traders", "WATER GUARD 491 16 KG", "2026-09-01", 2016, 1000),
+        ("Ali", "Alpha Traders", "ZEPOXY TABLE TOP DEEP POUR 1.5KG", "2026-09-02", 84, 500),
+        ("Ali", "Alpha Traders", "ZEPOXY TABLE TOP DEEP POUR 15 KG", "2026-09-02", 720, 900),
+        ("", "Beta", "WATER GUARD 491 16 KG", "2026-09-03", 5, 0),          # skipped: no salesperson
+        ("Ali", "Beta", "WATER GUARD 491 16 KG", "not a date", 7, 0),       # skipped: bad date
+    ])
+    up = lambda extra="": client.post(f"/data/upload?team=Import Team&mode=append{extra}", headers=admin,
+                                      files={"file": ("sep.xlsx", io.BytesIO(content))})
+    r = up()
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["inserted_rows"] == 3
+    chk = body["check"]
+    assert chk["skipped_rows"] == 2 and not chk["ok"]
+    water = next(p for p in chk["products"] if p["product"] == "WATER GUARD 491 16 KG")
+    assert water["file_qty"] == 2028 and water["saved_qty"] == 2016 and water["difference"] == -12
+    # 1.5KG was saved under the existing spelling "1.5 KG"; 15 KG stayed separate
+    small = next(p for p in chk["products"] if p["product"] == "ZEPOXY TABLE TOP DEEP POUR 1.5 KG")
+    assert small["saved_qty"] == 84 and small["difference"] == 0
+    big = next(p for p in chk["products"] if p["product"] == "ZEPOXY TABLE TOP DEEP POUR 15 KG")
+    assert big["saved_qty"] == 720
+
+    # same file again -> warning, nothing saved
+    again = up()
+    assert again.status_code == 409
+    d = again.json()["detail"]
+    assert d["code"] == "repeat_import" and d["same_file"] and d["overlap_lines"] == 3
+    # forced import goes through
+    forced = up("&force=true")
+    assert forced.status_code == 200
+    imports = client.get("/api/v2/imports", headers=admin).json()["imports"]
+    assert len([i for i in imports if i["team"] == "Import Team"]) == 2
+
+    # undo the forced one
+    iid = forced.json()["import_id"]
+    assert client.post(f"/api/v2/imports/{iid}/undo", json={}, headers=admin).status_code == 400
+    u = client.post(f"/api/v2/imports/{iid}/undo", json={"confirm": "UNDO"}, headers=admin)
+    assert u.status_code == 200 and u.json()["removed"] == 3
+    assert client.post(f"/api/v2/imports/{iid}/undo", json={"confirm": "UNDO"}, headers=admin).status_code == 400
+    rep = client.get("/api/product-contribution-report?year=2026&team=Import Team", headers=admin).json()
+    assert rep["overall_total_qty"] == 1 + 2016 + 84 + 720
+    actions = {e["action"] for e in client.get("/api/v2/audit", headers=admin).json()["events"]}
+    assert {"sales.upload", "sales.import_undo"} <= actions
+
+
+def test_member_cannot_undo_other_team_import(client, admin, org):
+    imports = client.get("/api/v2/imports", headers=admin).json()["imports"]
+    iid = next(i["id"] for i in imports if i["team"] == "Import Team" and not i["undone_at"])
+    member = login(client, "khi_coord", "pass1234")
+    r = client.post(f"/api/v2/imports/{iid}/undo", json={"confirm": "UNDO"}, headers=member)
+    assert r.status_code == 403
+
+
+def test_entry_reuses_existing_spelling(client, admin):
+    client.post("/api/teams", json={"name": "Spell Team"}, headers=admin)
+    raw_sale("Spell Team", "Ali", "ABC Traders", "Tile Bond 20 KG", "2026-02-01", 1)
+    _raw_sql("INSERT INTO clients (name) VALUES ('ABC Traders') ON CONFLICT DO NOTHING")
+    _raw_sql("INSERT INTO products (name) VALUES ('Tile Bond 20 KG') ON CONFLICT DO NOTHING")
+    r = client.post("/data/entry", headers=admin, json={"team": "Spell Team", "sales_person": "Ali",
+                                                        "client_name": "abc traders", "product": "tile bond 20kg",
+                                                        "entry_date": "2026-02-02", "quantity": 3})
+    assert r.status_code == 200
+    saved = r.json()["saved"]
+    assert saved["client_name"] == "ABC Traders" and saved["product"] == "Tile Bond 20 KG"
+    # a different pack size is a different product
+    r = client.post("/data/entry", headers=admin, json={"team": "Spell Team", "sales_person": "Ali",
+                                                        "client_name": "ABC Traders", "product": "Tile Bond 2.0 KG",
+                                                        "entry_date": "2026-02-02", "quantity": 1})
+    assert r.json()["saved"]["product"] == "Tile Bond 2.0 KG"
+    m = client.get("/api/v2/names/match?kind=client&name=ABC  traders.", headers=admin).json()
+    assert m["saved_as"] == "ABC Traders" and m["changed"] and not m["is_new"]
+    m = client.get("/api/v2/names/match?kind=client&name=Brand New Co", headers=admin).json()
+    assert m["is_new"] and not m["changed"]
+    # visits too, including several products in one visit
+    v = {"team": "Spell Team", "sales_person": "Ali", "client_name": "ABC TRADERS", "client_category": "",
+         "product": "tile bond 20kg, Something New", "meeting_date": "2026-02-03", "meeting_time": "10:00",
+         "meeting_type": "Visit", "meeting_status": "Done", "client_response": "", "notes": ""}
+    assert client.post("/api/visit-entry", json=v, headers=admin).status_code == 200
+    rows = client.get("/api/visit-entries?team=Spell Team", headers=admin).json()
+    rows = rows.get("visits", rows) if isinstance(rows, dict) else rows
+    assert any(x["client_name"] == "ABC Traders" and x["product"] == "Tile Bond 20 KG, Something New" for x in rows)
+    # admin product list refuses a second spelling
+    assert client.post("/api/products", json={"name": "TILE BOND 20kg"}, headers=admin).status_code == 409
+
+
+def test_monthly_workbook_import_and_check(client, admin):
+    from openpyxl import Workbook
+    client.post("/api/teams", json={"name": "Monthly Team"}, headers=admin)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "2025"
+    ws.append(["Sales Person", "Client Name", "Product", "Jan", "Feb", "Mar"])
+    ws.append(["Sara", "Gamma Co", "Tile Grout 5 KG", 10, 0, 4.5])
+    ws.append(["Sara", None, "Tile Grout 5 KG", 3, None, None])  # no customer -> skipped
+    buf = io.BytesIO()
+    wb.save(buf)
+    r = client.post("/data/upload?team=Monthly Team&mode=append", headers=admin,
+                    files={"file": ("m.xlsx", io.BytesIO(buf.getvalue()))})
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["mode"] == "monthly_excel" and b["inserted_rows"] == 2
+    assert b["check"]["file_qty"] == 17.5 and b["check"]["saved_qty"] == 14.5 and b["check"]["skipped_rows"] == 1
+    assert b["date_from"] == "2025-01-01" and b["date_to"] == "2025-03-01"
+
+
+def test_boss_agent_health_and_errors(client, monkeypatch):
+    monkeypatch.delenv("BOSS_AGENT_KEY", raising=False)
+    h = client.get("/api/boss-agent/health").json()
+    assert h["status"] == "problem" and not h["boss_agent_key_configured"] and h["database"] == "ok"
+    r = client.post("/api/boss-agent", json={"question": "total sales"}, headers={"x-boss-agent-key": "x"})
+    assert r.status_code == 500 and "BOSS_AGENT_KEY" in r.json()["detail"]
+    monkeypatch.setenv("BOSS_AGENT_KEY", "k1")
+    h = client.get("/api/boss-agent/health", headers={"x-boss-agent-key": "k1"}).json()
+    assert h["status"] == "ok" and h["key_matches"] and "k1" not in str(h)
+    assert client.get("/api/boss-agent/health", headers={"x-boss-agent-key": "bad"}).json()["status"] == "problem"
+    r = client.post("/api/boss-agent", json={"question": "total sales 2026"}, headers={"x-boss-agent-key": "k1"})
+    assert r.status_code == 200

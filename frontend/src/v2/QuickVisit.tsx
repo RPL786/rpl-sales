@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { apiJson } from "./authFetch";
 import { OfflineError, enqueueVisit, flushQueue, postVisit, readQueue } from "./offlineQueue";
+import NameHint from "./NameHint";
+import VoiceButton from "./VoiceButton";
 
 type Props = {
   canChooseOwner: boolean;
@@ -290,6 +292,7 @@ export default function QuickVisit({ canChooseOwner, onSaved }: Props) {
             </div>
           )}
         </div>
+        <NameHint kind="client" name={form.client_name} enabled={online && !showHits} onUse={(n) => set("client_name", n)} />
         <div className="v2-chips-scroll">
           {CATEGORIES.map((c) => (
             <button
@@ -387,6 +390,7 @@ export default function QuickVisit({ canChooseOwner, onSaved }: Props) {
           onChange={(e) => set("notes", e.target.value)}
           rows={3}
         />
+        <VoiceButton value={form.notes} onChange={(v) => set("notes", v)} />
       </div>
 
       {error && <div className="status error">{error}</div>}

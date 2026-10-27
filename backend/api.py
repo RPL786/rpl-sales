@@ -73,7 +73,14 @@ app.include_router(v2_analytics_router)
 from v2.home import router as v2_home_router
 app.include_router(v2_home_router)
 from v2.datahealth import router as v2_datahealth_router
+from v2 import imports as v2_imports
+from v2 import names as v2_names
+from v2.names import router as v2_names_router
+from v2.imports import router as v2_imports_router
+from v2.db import transaction as v2_transaction
 app.include_router(v2_datahealth_router)
+app.include_router(v2_imports_router)
+app.include_router(v2_names_router)
 
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
@@ -2564,6 +2571,9 @@ def add_client(payload: NameRequest, user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        existing = v2_names.canonical(cur, "client", name)
+        if existing != name:
+            return {"status": "ok", "message": f'Already exists as "{existing}"', "name": existing}
         cur.execute("INSERT INTO clients (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (name,))
         conn.commit()
         return {"status": "ok", "message": "Client added", "name": name}
@@ -2607,6 +2617,9 @@ def add_product(payload: NameRequest, user: dict = Depends(require_admin)):
     cur = conn.cursor()
 
     try:
+        other = v2_names.existing_other_spelling(cur, "product", name)
+        if other:
+            raise HTTPException(status_code=409, detail=f'This product already exists as "{other}". Edit that one instead.')
         cur.execute(
             """
             INSERT INTO products (name, category)
@@ -2633,6 +2646,9 @@ def update_product(product_id: int, payload: NameRequest, user: dict = Depends(r
     cur = conn.cursor()
 
     try:
+        other = v2_names.existing_other_spelling(cur, "product", name, exclude_id=product_id)
+        if other:
+            raise HTTPException(status_code=409, detail=f'Another product already uses this name: "{other}". Use Data Health to merge them.')
         cur.execute(
             """
             UPDATE products
@@ -3272,6 +3288,9 @@ def add_entry(entry: dict, user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        # V2: reuse the existing spelling of this customer / product (no new name variants)
+        client_name = v2_names.canonical(cur, "client", client_name)
+        product = v2_names.canonical(cur, "product", product)
         ensure_lookup_value(conn, "teams", team)
         ensure_lookup_value(conn, "sales_people", sales_person)
         ensure_lookup_value(conn, "clients", client_name)
@@ -3374,8 +3393,11 @@ def upload_to_db(
     file: UploadFile = File(...),
     team: str = "",
     mode: str = "append",
+    force: bool = False,
     user: dict = Depends(get_current_user),
 ):
+    """Excel import. V2: warns before a repeat import (409 unless force=true), records the
+    import so it can be undone, and returns a file-vs-saved totals check."""
     upload_access = resolve_access(user)
     if not upload_access.can(V2_UPLOAD_SALES):
         raise HTTPException(status_code=403, detail="You do not have permission to upload sales data")
@@ -3385,302 +3407,77 @@ def upload_to_db(
         if not existing_team:
             raise HTTPException(status_code=400, detail="Team not found. Ask Super Admin to create it first.")
         team = existing_team
-    v2_audit.record_standalone(upload_access, "sales.upload", "team", (team or "").strip(),
-                               {"mode": mode, "filename": file.filename if file else None})
-    print("UPLOAD ROUTE HIT", team, file.filename if file else "NO_FILE", flush=True)
-    print("STEP 1: route started")
+    team = (team or "").strip()
+    if not team:
+        raise HTTPException(status_code=400, detail="Team is required")
+    mode = (mode or "append").strip().lower()
+    if mode not in {"append", "replace"}:
+        raise HTTPException(status_code=400, detail="Mode must be append or replace")
+
     try:
-        team = team.strip()
-        if not team:
-            raise HTTPException(status_code=400, detail="Team is required")
+        content = file.file.read()
+        parsed = v2_imports.parse_sales_file(content, file.filename or "")
+    except v2_imports.ImportFormatError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read the Excel file: {exc}") from exc
+    if not parsed.rows:
+        raise HTTPException(status_code=400, detail="No sales lines found in this file (all rows were empty or skipped)")
 
-        mode = (mode or "append").strip().lower()
-        if mode not in {"append", "replace"}:
-            raise HTTPException(status_code=400, detail="Mode must be append or replace")
-
-        filename = (file.filename or "").lower()
-        print("STEP 2: filename =", filename)
-        print("STEP 2B: mode =", mode)
-
-        conn = get_db_connection()
-        print("STEP 3: db connected")
-        cur = conn.cursor()
-        inserted = 0
-
-        try:            
-            ensure_lookup_value(conn, "teams", team)
-
+    digest = v2_imports.file_hash(content)
+    dates = sorted(r[7] for r in parsed.rows)
+    try:
+        with v2_transaction() as cur:
+            parsed.rows = v2_imports.use_existing_names(cur, parsed.rows)
+            if mode == "append" and not force:
+                repeat = v2_imports.find_repeats(cur, team, digest, parsed.rows)
+                if repeat:
+                    raise HTTPException(status_code=409, detail={
+                        "code": "repeat_import",
+                        "message": "This data looks like it was already imported for this team.",
+                        **repeat,
+                    })
+            cur.execute("INSERT INTO teams (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (team,))
             if mode == "replace":
                 cur.execute("DELETE FROM sales_entries WHERE team = %s", (team,))
-                conn.commit()
-                print("STEP 4B: existing team data deleted for replace mode")
-
-            # Mode 1: monthly workbook
-            if filename.endswith(".xlsx") or filename.endswith(".xls"):
-                workbook = pd.ExcelFile(file.file, engine="openpyxl")
-                print("STEP 5: workbook opened")
-                print("STEP 6: sheet names =", workbook.sheet_names)
-
-                for s in workbook.sheet_names:
-                    try:
-                        temp_df = pd.read_excel(workbook, sheet_name=s, engine="openpyxl")
-                        print("DEBUG SHEET:", s)
-                        print("DEBUG COLUMNS:", list(temp_df.columns))
-                    except Exception as exc:
-                        print("DEBUG SHEET READ FAILED:", s, str(exc))
-
-                year_sheets = {}
-                for sheet_name in workbook.sheet_names:
-                    year = parse_year_sheet_name(sheet_name)
-                    if year is not None:
-                        year_sheets[year] = sheet_name
-
-                if year_sheets:
-                    monthly_rows_to_insert = []
-
-                    for year_value, sheet_name in year_sheets.items():
-                        df = pd.read_excel(workbook, sheet_name=sheet_name, engine="openpyxl")
-                        print("STEP 8: sheet loaded =", sheet_name, "rows =", len(df))
-                        df = df.rename(columns=lambda x: str(x).strip())
-
-                        required_cols = {"Sales Person", "Client Name", "Product"}
-                        if not required_cols.issubset(set(df.columns)):
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"Sheet '{sheet_name}' missing required columns",
-                            )
-
-                        for month_name in MONTHS:
-                            if month_name not in df.columns:
-                                df[month_name] = 0
-
-                        # bulk lookup prep
-                        sales_people = set()
-                        clients = set()
-                        products = set()
-
-                        for _, row in df.iterrows():
-                            sales_person = str(row["Sales Person"]).strip()
-                            client_name = str(row["Client Name"]).strip()
-                            product = str(row["Product"]).strip()
-
-                            if not sales_person or not client_name or not product:
-                                continue
-
-                            sales_people.add(sales_person)
-                            clients.add(client_name)
-                            products.add(product)
-
-                            for month_name in MONTHS:
-                                qty = pd.to_numeric(row[month_name], errors="coerce")
-                                qty = 0 if pd.isna(qty) else float(qty)
-                                if qty == 0:
-                                    continue
-
-                                entry_date = make_month_date(year_value, month_name)
-                                amount = 0.0
-
-                                amount_col_1 = f"{month_name} Amount"
-                                amount_col_2 = f"{month_name}_Amount"
-                                amount_col_3 = f"Amount {month_name}"
-
-                                for amount_col in [amount_col_1, amount_col_2, amount_col_3]:
-                                    if amount_col in df.columns:
-                                        raw_amount = pd.to_numeric(row[amount_col], errors="coerce")
-                                        amount = 0 if pd.isna(raw_amount) else float(raw_amount)
-                                        break
-
-                                monthly_rows_to_insert.append((
-                                    team,
-                                    sales_person,
-                                    client_name,
-                                    "",
-                                    product,
-                                    int(year_value),
-                                    month_name,
-                                    qty,
-                                    amount,
-                                    entry_date,
-                                ))
-
-                        for value in sales_people:
-                            cur.execute("INSERT INTO sales_people (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (value,))
-                        for value in clients:
-                            cur.execute("INSERT INTO clients (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (value,))
-                        for value in products:
-                            cur.execute("INSERT INTO products (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (value,))
-
-                    if monthly_rows_to_insert:
-                        cur.executemany("""
-                        INSERT INTO sales_entries
-                        (team, sales_person, client_name, client_category, product, year, month, quantity, amount, entry_date)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """, monthly_rows_to_insert)
-                        inserted = len(monthly_rows_to_insert)
-
-                    conn.commit()
-                    print("STEP 9: monthly commit done, inserted =", inserted)
-                    return {
-                        "status": "uploaded",
-                        "mode": "monthly_excel",
-                        "inserted_rows": inserted,
-                        "team": team,
-                    }
-                
-                # Mode 2: date-wise Excel
-                file.file.seek(0)
-                workbook = pd.ExcelFile(file.file, engine="openpyxl")
-
-                expected_cols = {"Sales Person", "Client Name", "Product", "Date", "Quantity"}
-                optional_cols = {"Amount"}
-                date_frames = []
-
-                for sheet_name in workbook.sheet_names:
-                    df_sheet = pd.read_excel(workbook, sheet_name=sheet_name, engine="openpyxl")
-
-                    df_sheet = df_sheet.rename(columns=lambda x: str(x).strip())
-
-                    # FIRST CHECK COLUMNS
-                    if not expected_cols.issubset(set(df_sheet.columns)):
-                        print(
-                            "SKIPPING SHEET MISSING DATE COLS:",
-                            sheet_name,
-                            list(df_sheet.columns),
-                            flush=True
-                        )
-                        continue
-
-                    # KEEP ONLY REQUIRED COLUMNS
-                    keep_cols = list(expected_cols)
-                    if "Amount" in df_sheet.columns:
-                        keep_cols.append("Amount")
-
-                    df_sheet = df_sheet[keep_cols]
-
-                    # REMOVE BLANK ROWS
-                    df_sheet = df_sheet.dropna(how="all")
-
-                    df_sheet = df_sheet.dropna(
-                        subset=["Sales Person", "Client Name", "Product", "Date", "Quantity"],
-                        how="all"
-                    )
-
-                    print(
-                        "CLEAN DATE ROWS:",
-                        sheet_name,
-                        len(df_sheet),
-                        flush=True
-                    )
-
-                    date_frames.append(df_sheet)
-
-                if date_frames:
-                    df = pd.concat(date_frames, ignore_index=True)
-
-                    sales_people = set()
-                    clients = set()
-                    products = set()
-                    date_rows_to_insert = []
-
-                    print("STEP 9A: starting row conversion, rows =", len(df), flush=True)
-
-                    for idx, row in df.iterrows():
-
-                        if idx % 1000 == 0:
-                            print("STEP 9B: processed rows =", idx, flush=True)
-                        sales_person = str(row["Sales Person"]).strip()
-                        client_name = str(row["Client Name"]).strip()
-                        product = str(row["Product"]).strip()
-
-                        if sales_person.lower() in {"", "nan", "none"}:
-                            continue
-                        if client_name.lower() in {"", "nan", "none"}:
-                            continue
-                        if product.lower() in {"", "nan", "none"}:
-                            continue
-
-                        quantity = pd.to_numeric(row["Quantity"], errors="coerce")
-                        if pd.isna(quantity) or float(quantity) == 0:
-                            continue
-
-                        amount = 0.0
-                        if "Amount" in row.index:
-                            raw_amount = pd.to_numeric(row["Amount"], errors="coerce")
-                            amount = 0 if pd.isna(raw_amount) else float(raw_amount)
-
-                        parsed_date = pd.to_datetime(row["Date"], errors="coerce")
-                        if pd.isna(parsed_date):
-                            continue
-
-                        entry_date = parsed_date.strftime("%Y-%m-%d")
-                        year = year_from_date(entry_date)
-                        month = month_from_date(entry_date)
-
-                        sales_people.add(sales_person)
-                        clients.add(client_name)
-                        products.add(product)
-
-                        date_rows_to_insert.append((
-                            team,
-                            sales_person,
-                            client_name,
-                            "",
-                            product,
-                            year,
-                            month,
-                            float(quantity),
-                            amount,
-                            entry_date,
-                        ))
-
-                    for value in sales_people:
-                        cur.execute("INSERT INTO sales_people (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (value,))
-                    for value in clients:
-                        cur.execute("INSERT INTO clients (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (value,))
-                    for value in products:
-                        cur.execute("INSERT INTO products (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (value,))
-
-                    print("STEP 9C: rows ready for DB insert =", len(date_rows_to_insert), flush=True)
-                    
-                    if date_rows_to_insert:
-                        print("STEP 9D: starting DB insert", flush=True)
-                        
-                        execute_values(
-                            cur,
-                            """
-                            INSERT INTO sales_entries
-                            (team, sales_person, client_name, client_category, product, year, month, quantity, amount, entry_date)
-                            VALUES %s
-                            """,
-                            date_rows_to_insert,
-                            page_size=1000
-                        )
-
-                        print("STEP 9E: DB insert finished", flush=True)
-                        
-                        inserted = len(date_rows_to_insert)
-
-                    conn.commit()
-                    print("STEP 10: date-wise commit done, inserted =", inserted, flush=True)
-                    return {
-                        "status": "uploaded",
-                        "mode": "date_excel",
-                        "inserted_rows": inserted,
-                        "team": team,
-                    }
-
-        finally:
-            conn.close()
-
+                replaced = cur.rowcount
+            else:
+                replaced = 0
+            cur.execute(
+                """INSERT INTO import_batches (team, filename, file_hash, mode, layout, date_from, date_to, user_id, username)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                (team, file.filename, digest, mode, parsed.layout, dates[0], dates[-1],
+                 upload_access.user_id, upload_access.username),
+            )
+            import_id = cur.fetchone()[0]
+            inserted = v2_imports.save_rows(cur, team, import_id, parsed.rows)
+            check = v2_imports.reconcile(cur, import_id, parsed)
+            cur.execute(
+                "UPDATE import_batches SET rows_inserted = %s, qty_total = %s, check_ok = %s WHERE id = %s",
+                (inserted, check["saved_qty"], check["ok"], import_id),
+            )
+            v2_audit.record(cur, upload_access, "sales.upload", "team", team, {
+                "mode": mode, "filename": file.filename, "import_id": import_id, "rows": inserted,
+                "replaced_rows": replaced, "forced": bool(force), "check_ok": check["ok"],
+            })
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(exc)}") from exc
 
-    raise HTTPException(
-        status_code=400,
-        detail="Excel format not recognized. Use either monthly year-sheet format or date-wise columns: Sales Person, Client Name, Product, Date, Quantity"
-    )
+    return {
+        "status": "uploaded",
+        "mode": parsed.layout,
+        "inserted_rows": inserted,
+        "team": team,
+        "import_id": import_id,
+        "replaced_rows": replaced,
+        "date_from": dates[0],
+        "date_to": dates[-1],
+        "check": check,
+    }
 
 @app.post("/admin/clear-database")
 def clear_database(payload: dict = Body(default={}), user: dict = Depends(get_current_user)):
@@ -3850,6 +3647,8 @@ def create_visit_entry(payload: VisitEntryRequest, user: dict = Depends(get_curr
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        row["client_name"] = v2_names.canonical(cur, "client", row["client_name"])
+        row["product"] = v2_names.canonical_products_text(cur, row["product"])
         cur.execute("""
             INSERT INTO visit_entries (
                 created_by, created_at, team, sales_person, client_name, client_category, product,
@@ -3911,6 +3710,10 @@ def create_visit_entries_bulk(payload: VisitBulkRequest, user: dict = Depends(ge
     cur = conn.cursor()
 
     try:
+        client_map = v2_names.canonical_map(cur, "client", [r["client_name"] for r in rows])
+        for r in rows:
+            r["client_name"] = client_map.get(r["client_name"], r["client_name"])
+            r["product"] = v2_names.canonical_products_text(cur, r["product"])
         cur.executemany("""
             INSERT INTO visit_entries (
                 created_by, created_at, team, sales_person, client_name, client_category, product,
@@ -4103,9 +3906,9 @@ def update_visit_entry(visit_id: int, payload: VisitEntryRequest, user: dict = D
         """, (
             payload.team.strip(),
             payload.sales_person.strip(),
-            payload.client_name.strip(),
+            v2_names.canonical(cur, "client", payload.client_name),
             payload.client_category.strip(),
-            payload.product.strip(),
+            v2_names.canonical_products_text(cur, payload.product),
             payload.meeting_date,
             payload.meeting_time,
             payload.meeting_type.strip(),
@@ -4519,12 +4322,62 @@ def get_salespersons(x_boss_agent_key: str = Header(default="")):
         cur.close()
         conn.close()
 
+@app.get("/api/boss-agent/health")
+def boss_agent_health(x_boss_agent_key: str = Header(default="")):
+    """Connection check for external agents (e.g. Mustaqeem). Open it in a browser:
+    it shows whether the agent key is set on the server and whether the database answers.
+    It never shows the key itself."""
+    expected_key = os.getenv("BOSS_AGENT_KEY", "").strip()
+    out = {
+        "app": "RPL Sales",
+        "version": "2.0",
+        "boss_agent_key_configured": bool(expected_key),
+        "key_sent": bool(x_boss_agent_key),
+        "key_matches": bool(expected_key) and x_boss_agent_key.strip() == expected_key,
+    }
+    try:
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM sales_entries")
+            out["database"] = "ok"
+            out["sales_lines"] = int(cur.fetchone()[0])
+        finally:
+            conn.close()
+    except Exception as exc:
+        out["database"] = f"error: {str(exc)[:200]}"
+    problems = []
+    if not out["boss_agent_key_configured"]:
+        problems.append("BOSS_AGENT_KEY is missing in the server environment (Portainer > container > Env)")
+    if out["database"] != "ok":
+        problems.append("Database is not reachable")
+    if out["key_sent"] and not out["key_matches"]:
+        problems.append("The agent's key does not match BOSS_AGENT_KEY on the server")
+    out["status"] = "ok" if not problems else "problem"
+    out["problems"] = problems
+    return out
+
+
 @app.post("/api/boss-agent")
 def boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = Header(default="")):
+    try:
+        return _boss_agent(payload, x_boss_agent_key)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+
+        print("BOSS AGENT ERROR:", repr(exc), flush=True)
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Boss agent failed: {type(exc).__name__}: {str(exc)[:300]}") from exc
+
+
+def _boss_agent(payload: BossAgentRequest, x_boss_agent_key: str = ""):
     expected_key = os.getenv("BOSS_AGENT_KEY", "").strip()
 
     if not expected_key:
-        raise HTTPException(status_code=500, detail="BOSS_AGENT_KEY is not configured")
+        print("BOSS AGENT ERROR: BOSS_AGENT_KEY is not set in the server environment", flush=True)
+        raise HTTPException(status_code=500, detail="BOSS_AGENT_KEY is not configured on the server")
 
     if x_boss_agent_key != expected_key:
         raise HTTPException(status_code=401, detail="Invalid boss agent key")

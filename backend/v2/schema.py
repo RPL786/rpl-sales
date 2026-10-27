@@ -105,6 +105,30 @@ DDL = [
         PRIMARY KEY (kind, name_key)
     )
     """,
+    # --- Import history: every Excel import, so repeats are caught and one import can be undone
+    """
+    CREATE TABLE IF NOT EXISTS import_batches (
+        id BIGSERIAL PRIMARY KEY,
+        team TEXT NOT NULL,
+        filename TEXT,
+        file_hash TEXT,
+        mode TEXT NOT NULL DEFAULT 'append',
+        layout TEXT,
+        rows_inserted INTEGER NOT NULL DEFAULT 0,
+        qty_total DOUBLE PRECISION NOT NULL DEFAULT 0,
+        date_from TEXT,
+        date_to TEXT,
+        check_ok BOOLEAN,
+        user_id INTEGER,
+        username TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        undone_at TIMESTAMPTZ
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_import_batches_team_hash ON import_batches (team, file_hash)",
+    "ALTER TABLE sales_entries ADD COLUMN IF NOT EXISTS import_id BIGINT",
+    "CREATE INDEX IF NOT EXISTS idx_sales_entries_import ON sales_entries (import_id) WHERE import_id IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_sales_entries_team_date ON sales_entries (team, entry_date)",
 ]
 
 

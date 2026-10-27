@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import VoiceButton from "../v2/VoiceButton";
 
 const API_BASE_URL = "";
 
@@ -905,6 +906,7 @@ export default function VisitForm() {
                 </td>
                 <td>
                   <input className="filter-select" placeholder="Notes" value={row.notes} onChange={(e) => updateRow(index, "notes", e.target.value)} />
+                  <VoiceButton compact value={row.notes} onChange={(v) => updateRow(index, "notes", v)} />
                 </td>
                 <td>
                   <button className="action-btn" type="button" onClick={() => removeRow(index)}>
