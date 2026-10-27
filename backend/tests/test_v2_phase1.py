@@ -573,3 +573,52 @@ def test_notifications(client, org):
     assert "overdue" in kinds and body["count"] >= 1
     leader = client.get("/api/v2/notifications", headers=login(client, "saddam", "pass1234")).json()
     assert "behind" in {i["kind"] for i in leader["items"]}
+
+
+# ============================================================ Data health: no double counting
+def test_product_report_not_doubled_by_name_variants(client, admin, org):
+    client.post("/api/teams", json={"name": "Dup Team"}, headers=admin)
+    client.post("/data/entry", headers=admin, json={"team": "Dup Team", "sales_person": "X", "client_name": "Dup Co",
+                                                    "product": "WATER GUARD 491 16 KG", "entry_date": "2026-10-05",
+                                                    "quantity": 2016})
+    client.post("/api/products", json={"name": "Water Guard 491 16 kg"}, headers=admin)
+    r = client.get("/api/product-contribution-report?year=2026&team=Dup Team", headers=admin).json()
+    assert r["overall_total_qty"] == 2016
+
+
+def test_data_health_merge_and_duplicates(client, admin, org):
+    # same line imported twice + a spelling variant in sales
+    for _ in range(2):
+        client.post("/data/entry", headers=admin, json={"team": "Dup Team", "sales_person": "X", "client_name": "Dup Co",
+                                                        "product": "ZEPOXY Clear FULL", "entry_date": "2026-10-06",
+                                                        "quantity": 466.5})
+    client.post("/data/entry", headers=admin, json={"team": "Dup Team", "sales_person": "X", "client_name": "dup co.",
+                                                    "product": "Zepoxy clear full", "entry_date": "2026-10-07",
+                                                    "quantity": 1})
+    h = client.get("/api/v2/data-health", headers=admin).json()
+    keys = {g["key"] for g in h["products"]["groups"]}
+    assert "waterguard49116kg" in keys and "zepoxyclearfull" in keys
+    assert h["duplicate_lines"]["extra_lines"] >= 1
+    assert any(g["key"] == "dupco" for g in h["clients"]["groups"])
+
+    coord = login(client, "khi_coord", "pass1234")
+    assert client.get("/api/v2/data-health", headers=coord).status_code == 403
+    boss = login(client, "boss", "pass1234")
+    assert client.post("/api/v2/data-health/remove-duplicate-lines", json={"confirm": "DELETE"},
+                       headers=boss).status_code == 403
+
+    bad = client.post("/api/v2/data-health/merge", headers=admin,
+                      json={"kind": "product", "canonical": "ZEPOXY Clear FULL", "variants": ["Something else"]})
+    assert bad.status_code == 400
+    r = client.post("/api/v2/data-health/merge", headers=admin,
+                    json={"kind": "product", "canonical": "ZEPOXY Clear FULL", "variants": ["Zepoxy clear full"]})
+    assert r.status_code == 200 and r.json()["sales_lines_updated"] == 1
+
+    assert client.post("/api/v2/data-health/remove-duplicate-lines", json={}, headers=admin).status_code == 400
+    r = client.post("/api/v2/data-health/remove-duplicate-lines", json={"confirm": "DELETE"}, headers=admin)
+    assert r.status_code == 200 and r.json()["removed"] >= 1
+    rep = client.get("/api/product-contribution-report?year=2026&team=Dup Team&product=ZEPOXY Clear FULL",
+                     headers=admin).json()
+    assert rep["overall_total_qty"] == 467.5
+    after = client.get("/api/v2/data-health", headers=admin).json()
+    assert after["duplicate_lines"]["extra_lines"] == 0
