@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import VoiceButton from "../v2/VoiceButton";
+import VisitSearch from "../v2/VisitSearch";
 
 const API_BASE_URL = "";
 
@@ -133,9 +134,11 @@ export default function VisitForm() {
   const [editingVisitId, setEditingVisitId] = useState<number | null>(null);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
-  const [searchText, setSearchText] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // the visit list and its search now live in VisitSearch (server-side search)
+  const searchText: string = "";
+  const dateFrom: string = "";
+  const dateTo: string = "";
+  const [visitsVersion, setVisitsVersion] = useState(0);
   const [teams, setTeams] = useState<OptionItem[]>([]);
   const [products, setProducts] = useState<OptionItem[]>([]);
   const [clients, setClients] = useState<OptionItem[]>([]);
@@ -170,6 +173,7 @@ export default function VisitForm() {
         return;
       }
       setVisits(result.visits || []);
+      setVisitsVersion((n) => n + 1);
     } catch {
       setMessage("Visits load failed");
     }
@@ -955,107 +959,13 @@ export default function VisitForm() {
 
       <br />
 
-      <div className="section-head">
-        <div>
-          <h3>Visit List</h3>
-          <input
-            className="filter-select"
-            placeholder="Search visits..."
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            style={{ marginTop: 10, maxWidth: 420 }}
-          />
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-            <input className="filter-select" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-            <input className="filter-select" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-            <button
-              className="action-btn"
-              onClick={() => {
-                setDateFrom("");
-                setDateTo("");
-              }}
-            >
-              Clear Date Filter
-            </button>
-          </div>
-          <p className="section-subtext">Both older and newly saved visits are shown here.</p>
-        </div>
-      </div>
-
       {isAdmin && (
-        <button
-          className="action-btn primary-btn"
-          type="button"
-          onClick={downloadFollowupPdf}
-        >
-          Follow-up PDF
+        <button className="action-btn" type="button" onClick={downloadFollowupPdf} style={{ marginBottom: 12 }}>
+          Follow-up PDF (all open follow-ups)
         </button>
       )}
 
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Time</th>
-              <th>Team</th>
-              <th>Sales Person</th>
-              <th>Client</th>
-              <th>Product</th>
-              <th>Status</th>
-              <th>Notes</th>
-              <th>Next Follow-up</th>
-              {isAdmin && <th>Actions</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {filteredVisits.length === 0 ? (
-              <tr>
-                <td colSpan={isAdmin ? 10 : 9}>No visits found.</td>
-              </tr>
-            ) : (
-              filteredVisits.map((visit) => (
-                <tr
-                  key={visit.id}
-                  style={{
-                    background:
-                      visit.meeting_status === "Need Follow-up"
-                        ? "rgba(245, 158, 11, 0.12)"
-                        : visit.meeting_status === "Order Received"
-                        ? "rgba(16, 185, 129, 0.12)"
-                        : visit.meeting_status === "Rejected" || visit.meeting_status === "Closed"
-                        ? "rgba(239, 68, 68, 0.10)"
-                        : undefined,
-                  }}
-                >
-                  <td>{visit.meeting_date}</td>
-                  <td>{visit.meeting_time}</td>
-                  <td>{visit.team}</td>
-                  <td>{visit.sales_person}</td>
-                  <td>{visit.client_name}</td>
-                  <td>{visit.product}</td>
-                  <td>{visit.meeting_status}</td>
-                  <td>{visit.notes}</td>
-                  <td>{visit.next_meeting_date || "-"}</td>
-                  {isAdmin && (
-                    <td>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button className="action-btn" onClick={() => startEditVisit(visit)}>
-                          Edit
-                        </button>
-
-                        <button className="action-btn" onClick={() => deleteVisit(visit.id)}>
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      <VisitSearch isAdmin={isAdmin} refreshKey={visitsVersion} onEdit={(v) => startEditVisit(v as VisitEntry)} onDelete={deleteVisit} />
     </div>
   );
 }

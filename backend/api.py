@@ -77,6 +77,7 @@ from v2 import imports as v2_imports
 from v2 import names as v2_names
 from v2.today import build_morning_report as v2_build_morning_report
 from v2.today import router as v2_today_router
+from v2.visits import router as v2_visits_router
 from v2.names import router as v2_names_router
 from v2.imports import router as v2_imports_router
 from v2.db import transaction as v2_transaction
@@ -84,6 +85,7 @@ app.include_router(v2_datahealth_router)
 app.include_router(v2_imports_router)
 app.include_router(v2_names_router)
 app.include_router(v2_today_router)
+app.include_router(v2_visits_router)
 
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
@@ -3883,12 +3885,24 @@ def visit_report(user: dict = Depends(require_admin)):
         conn.close()
 
 
+def _visit_snapshot(cur, visit_id: int):
+    """The visit as it was, kept in the audit trail before an edit or delete."""
+    cur.execute("SELECT * FROM visit_entries WHERE id = %s", (visit_id,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {d[0]: row[i] for i, d in enumerate(cur.description)}
+
+
 @app.delete("/api/visit-entry/{visit_id}")
 def delete_visit_entry(visit_id: int, user: dict = Depends(require_admin)):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        before = _visit_snapshot(cur, visit_id)
         cur.execute("DELETE FROM visit_entries WHERE id = %s", (visit_id,))
+        if before:
+            v2_audit.record(cur, resolve_access(user), "visit.delete", "visit", visit_id, {"before": before})
         conn.commit()
         return {"status": "ok", "message": "Visit deleted"}
     finally:
@@ -3899,6 +3913,9 @@ def update_visit_entry(visit_id: int, payload: VisitEntryRequest, user: dict = D
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        before = _visit_snapshot(cur, visit_id)
+        if before:
+            v2_audit.record(cur, resolve_access(user), "visit.update", "visit", visit_id, {"before": before})
         cur.execute("""
             UPDATE visit_entries
             SET team = %s, sales_person = %s, client_name = %s, client_category = %s, product = %s,

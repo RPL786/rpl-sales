@@ -1693,3 +1693,48 @@ html[data-theme="day"] .v2-name-hint.existing { color: #047857; }
   .v2-today-item { flex-wrap: wrap; }
   .v2-today-actions { width: 100%; justify-content: flex-end; }
 }
+
+/* ---- Visit list: search, filters, calendar --------------------------------- */
+.v2-visit-search { margin-top: 16px; }
+.v2-vs-search { margin-top: 4px; }
+.v2-vs-search input { flex: 1; }
+.v2-vs-filters, .v2-vs-dates { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.v2-vs-filters .filter-select { min-width: 150px; flex: 1 1 150px; max-width: 240px; }
+.v2-vs-dates .filter-select { width: auto; }
+.v2-vs-summary { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-top: 12px; font-size: 14px; }
+.v2-vs-summary b { font-size: 16px; color: var(--accent); }
+.v2-vs-summary .warn b { color: #ef4444; }
+.v2-vs-table tbody tr { cursor: pointer; }
+.v2-vs-table td { vertical-align: top; }
+.v2-vs-sub { display: block; color: var(--muted, #94a3b8); font-size: 11px; }
+.v2-vs-notes { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-vs-table mark { background: rgba(var(--accent-rgb, 249, 115, 22), 0.28); color: inherit; border-radius: 3px; padding: 0 1px; }
+.v2-vs-table tr.open td { background: rgba(var(--accent-rgb, 249, 115, 22), 0.06); }
+.v2-vs-detail td { cursor: default; background: rgba(var(--accent-rgb, 249, 115, 22), 0.04); }
+.v2-vs-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 18px; }
+.v2-vs-detail-grid small { color: var(--muted, #94a3b8); text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; }
+.v2-vs-detail-grid p { margin: 2px 0 0; white-space: pre-wrap; }
+.v2-status.tone-warn { background: rgba(245, 158, 11, 0.15); color: #f59e0b; margin-left: 4px; }
+.v2-vs-table .v2-status + .v2-status { margin-left: 4px; }
+.v2-vs-pager { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; }
+.v2-activity { display: grid; gap: 12px; }
+.v2-cal-months { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+.v2-cal { display: grid; gap: 8px; align-content: start; }
+.v2-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.v2-cal-head { font-size: 11px; text-align: center; color: var(--muted, #94a3b8); }
+.v2-cal-day {
+  position: relative; display: grid; place-items: center; min-height: 40px; border-radius: 8px;
+  border: 1px solid var(--line); font-size: 12px; padding: 2px;
+}
+.v2-cal-day small { position: absolute; top: 2px; left: 4px; font-size: 9px; color: var(--muted, #94a3b8); }
+.v2-cal-day b { font-size: 14px; }
+.v2-cal-day.has { background: rgba(34, 197, 94, 0.14); border-color: rgba(34, 197, 94, 0.4); }
+.v2-cal-day.none { background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.4); color: #ef4444; }
+.v2-cal-day.off, .v2-cal-day.future { opacity: 0.45; }
+.v2-cal-late { position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: #f59e0b; }
+.v2-cal-changes ul { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 4px; font-size: 13px; }
+html[data-theme="day"] .v2-status.tone-warn { color: #b45309; }
+@media (max-width: 640px) {
+  .v2-vs-filters .filter-select { max-width: none; }
+  .v2-vs-notes { max-width: 160px; }
+}

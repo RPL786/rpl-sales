@@ -58,6 +58,7 @@ const ImportDialog = lazy(() => import("./v2/ImportDialog"));
 const DangerZone = lazy(() => import("./v2/DangerZone"));
 const HomePage = lazy(() => import("./v2/HomePage"));
 const QuickVisit = lazy(() => import("./v2/QuickVisit"));
+const VisitSearch = lazy(() => import("./v2/VisitSearch"));
 const DataHealth = lazy(() => import("./v2/DataHealth"));
 
 // Tabs that use the Global Filters (team / city / branch / salesperson / month / products)
@@ -2941,7 +2942,10 @@ const productSelectionLabel =
                   </span>
                 </div>
                 {visitMode === "quick" ? (
-                  <QuickVisit canChooseOwner={isAdmin || userRole === "dashboard_admin"} prefill={visitPrefill} />
+                  <>
+                    <QuickVisit canChooseOwner={isAdmin || userRole === "dashboard_admin"} prefill={visitPrefill} />
+                    <VisitSearch isAdmin={false} />
+                  </>
                 ) : (
                   <VisitForm />
                 )}
