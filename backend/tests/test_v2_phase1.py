@@ -887,3 +887,62 @@ def test_name_match_knows_visit_only_customers(client, admin):
     assert not m["is_new"] and not m["changed"]
     m = client.get("/api/v2/names/match?kind=client&name=late follow co.", headers=admin).json()
     assert m["saved_as"] == "Late Follow Co" and m["changed"]
+
+
+# ---------------------------------------------------------------------------
+# Visit search, activity calendar, export, edit/delete trail
+# ---------------------------------------------------------------------------
+
+def test_visit_search_activity_export(client, admin, org):
+    base = {"team": "Tile Adhesive", "sales_person": "ali", "client_category": "Dealer", "meeting_time": "10:00",
+            "meeting_type": "Initial Visit", "client_response": "", "next_meeting_date": ""}
+    ali = login(client, "ali", "pass1234")
+    for cname, prod, d, st, note in [("ABC Traders", "ZEPOXY TABLE TOP DEEP POUR 1.5 KG", "2026-10-05", "Interested", "wants rates"),
+                                     ("ABC Traders", "TA-100", "2026-10-20", "Order Received", ""),
+                                     ("Zed Paints", "TA-100", "2026-11-02", "Interested", "call in december")]:
+        r = client.post("/api/visit-entry", headers=ali,
+                        json={**base, "client_name": cname, "product": prod, "meeting_date": d, "meeting_status": st, "notes": note})
+        assert r.status_code == 200, r.text
+
+    s = lambda qs, h=admin: client.get(f"/api/v2/visits/search?{qs}", headers=h).json()
+    # several words, any order, month name, punctuation-insensitive
+    r = s("q=ali october abc")
+    assert r["total"] == 2 and {i["client_name"] for i in r["items"]} == {"ABC Traders"}
+    assert s("q=abc traders. 1.5kg")["total"] == 1
+    assert s("q=interested ali zed&date_from=2026-11-01")["total"] == 1
+    r = s("sales_person=ali&status=Order Received")
+    assert r["summary"]["orders"] == r["total"] >= 1
+    assert "ali" in r["options"]["sales_people"] and "Order Received" in r["options"]["statuses"]
+    item = s("q=zed paints")["items"][0]
+    assert item["entered_at"] and item["entered_late_days"] is not None and item["edited"] is None
+    # paging
+    r = s("page_size=10&page=1")
+    assert r["pages"] >= 1 and len(r["items"]) <= 10
+    # a member only finds their own visits
+    assert all(i["sales_person"] == "ali" or i["created_by"] == "ali" for i in s("q=", ali)["items"])
+    assert s("sales_person=AHMED", ali)["total"] == s("", ali)["total"]
+
+    # edit + delete leave a trail
+    vid = s("q=zed paints")["items"][0]["id"]
+    edit = {**base, "client_name": "Zed Paints", "product": "TA-100", "meeting_date": "2026-11-02",
+            "meeting_status": "Thinking", "notes": "edited"}
+    assert client.put(f"/api/visit-entry/{vid}", json=edit, headers=admin).status_code == 200
+    assert s("q=zed paints")["items"][0]["edited"]["count"] == 1
+    act = client.get("/api/v2/visits/activity?sales_person=ali&date_from=2026-10-01&date_to=2026-11-06",
+                     headers=admin).json()
+    oct5 = next(d for d in act["days"] if d["date"] == "2026-10-05")
+    assert oct5["visits"] >= 1 and act["summary"]["visits"] >= 3
+    assert any(c["action"] == "update" and c["client_name"] == "Zed Paints" for c in act["changes"])
+    assert client.delete(f"/api/visit-entry/{vid}", headers=admin).status_code == 200
+    act = client.get("/api/v2/visits/activity?sales_person=ali&date_from=2026-10-01&date_to=2026-11-06",
+                     headers=admin).json()
+    assert any(c["action"] == "delete" for c in act["changes"])
+    # member: own activity only, whatever name is passed
+    assert client.get("/api/v2/visits/activity?sales_person=AHMED", headers=ali).json()["sales_person"] == "ali"
+    assert client.get("/api/v2/visits/activity", headers=admin).status_code == 400
+
+    x = client.get("/api/v2/visits/export?sales_person=ali&date_from=2026-10-01", headers=admin)
+    assert x.status_code == 200 and x.content[:2] == b"PK"
+    from openpyxl import load_workbook
+    ws = load_workbook(io.BytesIO(x.content)).active
+    assert ws["E1"].value == "Customer" and ws.max_row >= 3
