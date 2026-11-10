@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import ErrorBoundary from "./v2/ErrorBoundary";
 import type { VisitPrefill } from "./v2/QuickVisit";
 import {
   AlertCircle,
@@ -2918,6 +2919,7 @@ const productSelectionLabel =
               {!loading && error && <span className="v2-filterbar-error">{error}</span>}
             </div>
           )}
+          <ErrorBoundary key={activeTab} where={activeTab} onHome={() => setActiveTab("home")}>
           <Suspense fallback={<TabFallback />}>
           <div className="tab-content v2-page-enter" key={activeTab}>
             {activeTab === "overview" && renderOverviewTab()}
@@ -3013,6 +3015,7 @@ const productSelectionLabel =
             )}
           </div>
           </Suspense>
+          </ErrorBoundary>
         </div>
       </div>
 

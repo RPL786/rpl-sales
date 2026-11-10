@@ -9,8 +9,10 @@ import { bootTheme } from './v2/theme'
 import { installTilt } from './v2/motion'
 import { setupPwa } from './v2/pwa'
 import { installQueueSync } from './v2/offlineQueue'
+import ErrorBoundary, { installGlobalErrorReporting } from './v2/ErrorBoundary'
 
 installAuthFetch()
+installGlobalErrorReporting()
 bootTheme()
 installTilt()
 setupPwa()
@@ -18,6 +20,8 @@ if (localStorage.getItem('auth_token')) installQueueSync()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary where="app">
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>,
 )

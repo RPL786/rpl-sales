@@ -946,3 +946,10 @@ def test_visit_search_activity_export(client, admin, org):
     from openpyxl import load_workbook
     ws = load_workbook(io.BytesIO(x.content)).active
     assert ws["E1"].value == "Customer" and ws.max_row >= 3
+
+
+def test_client_error_is_logged(client, capsys):
+    r = client.post("/api/v2/client-error", json={"kind": "render", "message": "Cannot read properties of undefined",
+                                                  "where": "visit", "user": "ali"})
+    assert r.status_code == 200 and r.json()["status"] == "logged"
+    assert "CLIENT ERROR [render] user=ali" in capsys.readouterr().out
