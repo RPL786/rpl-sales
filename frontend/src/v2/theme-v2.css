@@ -1738,3 +1738,9 @@ html[data-theme="day"] .v2-status.tone-warn { color: #b45309; }
   .v2-vs-filters .filter-select { max-width: none; }
   .v2-vs-notes { max-width: 160px; }
 }
+
+/* ---- Crash screen (instead of a white page) -------------------------------- */
+.v2-crash { display: grid; justify-items: center; gap: 10px; text-align: center; padding: 36px 20px; margin: 24px auto; max-width: 560px; }
+.v2-crash svg { color: #f59e0b; }
+.v2-crash h2 { margin: 0; }
+.v2-crash-msg { display: block; max-width: 100%; overflow-wrap: anywhere; font-size: 12px; padding: 8px 10px; border-radius: 8px; background: rgba(239, 68, 68, 0.1); color: #f87171; }

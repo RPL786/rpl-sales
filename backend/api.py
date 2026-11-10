@@ -78,6 +78,7 @@ from v2 import names as v2_names
 from v2.today import build_morning_report as v2_build_morning_report
 from v2.today import router as v2_today_router
 from v2.visits import router as v2_visits_router
+from v2.clientlog import router as v2_clientlog_router
 from v2.names import router as v2_names_router
 from v2.imports import router as v2_imports_router
 from v2.db import transaction as v2_transaction
@@ -86,6 +87,7 @@ app.include_router(v2_imports_router)
 app.include_router(v2_names_router)
 app.include_router(v2_today_router)
 app.include_router(v2_visits_router)
+app.include_router(v2_clientlog_router)
 
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
