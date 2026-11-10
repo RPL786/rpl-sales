@@ -953,3 +953,28 @@ def test_client_error_is_logged(client, capsys):
                                                   "where": "visit", "user": "ali"})
     assert r.status_code == 200 and r.json()["status"] == "logged"
     assert "CLIENT ERROR [render] user=ali" in capsys.readouterr().out
+
+
+def test_forecast_keeps_person_after_role_round_trip(client, admin):
+    client.post("/api/teams", json={"name": "TEAM FC (TILE ADHESIVE)"}, headers=admin)
+    r = client.post("/admin/create-user", headers=admin, json={"username": "FC SELLER", "password": "pass1234",
+                                                               "team": "TEAM FC (TILE ADHESIVE)", "role": "user"})
+    assert r.status_code == 200, r.text
+    uid = next(u["id"] for u in client.get("/api/v2/users", headers=admin).json()["users"] if u["username"] == "FC SELLER")
+    # a role round trip used to close the team history for good
+    assert client.put(f"/api/v2/users/{uid}/role", json={"role": "dashboard_admin"}, headers=admin).status_code == 200
+    assert client.put(f"/api/v2/users/{uid}/role", json={"role": "user"}, headers=admin).status_code == 200
+    from v2.analytics import _today
+    t = _today()
+    mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][t.month - 1]
+    rows = client.get(f"/forecast?team=TEAM FC (TILE ADHESIVE)&month={mon}&year={t.year}", headers=admin).json()
+    assert any(x["username"] == "FC SELLER" for x in rows)
+
+    # someone with a target this month is always shown, even with a history gap
+    _raw_sql("UPDATE user_team_history SET end_date = '2000-01-01' WHERE LOWER(username) = 'fc seller'")
+    client.put("/admin/monthly-target", headers=admin, json={"username": "FC SELLER", "team": "TEAM FC (TILE ADHESIVE)",
+                                                              "year": t.year, "month": mon, "target_type": "QTY",
+                                                              "target_value": 500})
+    rows = client.get(f"/forecast?team=team fc (tile adhesive)&month={mon}&year={t.year}", headers=admin).json()
+    me = next(x for x in rows if x["username"] == "FC SELLER")
+    assert me["sales_target"] == 500

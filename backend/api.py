@@ -3974,18 +3974,31 @@ def get_forecast(team: str = "", month: str = "", year: int = 0, user: dict = De
         achieved_field = "amount" if team_target_type == "AMOUNT" else "quantity"
 
         cur.execute(f"""
-            WITH team_users AS (
+            WITH team_users_raw AS (
                 SELECT
                     LOWER(TRIM(h.username)) AS username_key,
                     MIN(TRIM(h.username)) AS username
                 FROM user_team_history h
                 LEFT JOIN users u
                     ON LOWER(TRIM(u.username)) = LOWER(TRIM(h.username))
-                WHERE TRIM(h.team) = %s
+                WHERE LOWER(TRIM(h.team)) = LOWER(TRIM(%s))
                   AND h.start_date <= %s
                   AND COALESCE(h.end_date, '9999-12-31') >= %s
                   AND COALESCE(u.target_applicable, TRUE) = TRUE
                 GROUP BY LOWER(TRIM(h.username))
+                -- V2: anyone with a target in this team for the period is always shown,
+                -- even if their team history has a gap
+                UNION
+                SELECT LOWER(TRIM(st.username)), MIN(TRIM(st.username))
+                FROM sales_targets st
+                WHERE LOWER(TRIM(st.team)) = LOWER(TRIM(%s))
+                  AND st.target_year = %s
+                  AND (%s = '' OR st.target_month = %s)
+                  AND COALESCE(NULLIF(st.target_value, 0), st.target_kg, 0) > 0
+                GROUP BY LOWER(TRIM(st.username))
+            ),
+            team_users AS (
+                SELECT username_key, MIN(username) AS username FROM team_users_raw GROUP BY username_key
             ),
             target_agg AS (
                 SELECT
@@ -4000,7 +4013,7 @@ def get_forecast(team: str = "", month: str = "", year: int = 0, user: dict = De
                         END
                     ) AS sales_target
                 FROM sales_targets
-                WHERE TRIM(team) = %s
+                WHERE LOWER(TRIM(team)) = LOWER(TRIM(%s))
                   AND target_year = %s
                   AND (%s = '' OR target_month = %s)
                 GROUP BY LOWER(TRIM(username))
@@ -4010,7 +4023,7 @@ def get_forecast(team: str = "", month: str = "", year: int = 0, user: dict = De
                     LOWER(TRIM(sales_person)) AS username_key,
                     SUM(COALESCE({achieved_field}, 0)) AS achieved
                 FROM sales_entries
-                WHERE TRIM(team) = %s
+                WHERE LOWER(TRIM(team)) = LOWER(TRIM(%s))
                   AND year = %s
                   AND (%s = '' OR month = %s)
                 GROUP BY LOWER(TRIM(sales_person))
@@ -4028,6 +4041,10 @@ def get_forecast(team: str = "", month: str = "", year: int = 0, user: dict = De
             team,
             period_end,
             period_start,
+            team,
+            year,
+            month,
+            month,
             team_target_type,
             team_target_type,
             team,

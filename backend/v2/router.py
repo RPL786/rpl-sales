@@ -421,6 +421,25 @@ def set_user_role(user_id: int, payload: RoleIn, access: Access = Depends(requir
                 (date.today().isoformat(), user_id),
             )
             cur.execute("UPDATE users SET target_applicable = FALSE WHERE id = %s", (user_id,))
+        elif role not in TEAMLESS_ROLES and old_role in TEAMLESS_ROLES:
+            # Back to a field role: re-open team membership so Forecast / Home count the person again
+            cur.execute("SELECT 1 FROM user_team_history WHERE user_id = %s AND end_date IS NULL", (user_id,))
+            if not cur.fetchone():
+                cur.execute(
+                    """SELECT id FROM user_team_history WHERE user_id = %s AND LOWER(TRIM(team)) = LOWER(TRIM(%s))
+                       ORDER BY id DESC LIMIT 1""",
+                    (user_id, team),
+                )
+                last = cur.fetchone()
+                if last:
+                    cur.execute("UPDATE user_team_history SET end_date = NULL WHERE id = %s", (last[0],))
+                else:
+                    cur.execute(
+                        """INSERT INTO user_team_history (user_id, username, team, start_date, end_date)
+                           VALUES (%s, %s, %s, %s, NULL)""",
+                        (user_id, username, team, date.today().isoformat()),
+                    )
+            cur.execute("UPDATE users SET target_applicable = TRUE WHERE id = %s", (user_id,))
         audit.record(cur, access, "user.role_change", "user", user_id,
                      {"username": username, "from": old_role, "to": role})
     return {"status": "ok", "note": "User must log in again for the new role to apply"}
