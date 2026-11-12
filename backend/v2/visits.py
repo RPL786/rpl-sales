@@ -250,6 +250,8 @@ def visit_activity(
         )
         by_entry = {d.isoformat(): (int(n), int(l or 0)) for d, n, l in cur.fetchall() if d}
 
+        from .attendance import leave_days
+        leave = leave_days(cur, person, start, end)
         cur.execute(
             """SELECT action, occurred_at, actor_username, details FROM audit_events
                WHERE action IN ('visit.update', 'visit.delete') AND occurred_at >= %s
@@ -272,9 +274,10 @@ def visit_activity(
         v, o = by_meeting.get(iso, (0, 0))
         e, late = by_entry.get(iso, (0, 0))
         days.append({"date": iso, "weekday": d.strftime("%a"), "visits": v, "orders": o, "entries": e,
-                     "late_entries": late, "sunday": d.weekday() == 6, "future": d > today})
+                     "late_entries": late, "sunday": d.weekday() == 6, "future": d > today,
+                     "leave": leave.get(iso)})
         d += timedelta(days=1)
-    working = [x for x in days if not x["sunday"] and not x["future"]]
+    working = [x for x in days if not x["sunday"] and not x["future"] and not x["leave"]]
     return {
         "sales_person": person,
         "from": start.isoformat(),
@@ -287,6 +290,7 @@ def visit_activity(
             "days_with_visits": sum(1 for x in working if x["visits"]),
             "days_without_visits": sum(1 for x in working if not x["visits"]),
             "late_entries": sum(x["late_entries"] for x in days),
+            "leave_days": sum(1 for x in days if x["leave"] and not x["sunday"]),
         },
         "changes": changes,
     }

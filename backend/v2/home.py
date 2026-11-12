@@ -279,4 +279,16 @@ def notifications(access: Access = Depends(get_access)):
         items.append({"kind": "risk", "level": "low", "tab": "home",
                       "title": f"{h['at_risk']['count']} customers bought last year but not yet this year",
                       "detail": ", ".join(c["name"] for c in h["at_risk"]["top"][:3])})
+    from .attendance import pending_counts
+
+    with transaction() as cur:
+        pc = pending_counts(cur, access)
+    if pc["unlocks"]:
+        items.insert(0, {"kind": "unlock", "level": "high", "tab": "leave",
+                         "title": f"{pc['unlocks']} visit date unlock request{'s' if pc['unlocks'] != 1 else ''} waiting",
+                         "detail": "Approve or reject in Leave & Unlock"})
+    if pc["leaves"]:
+        items.insert(0, {"kind": "leave", "level": "medium", "tab": "leave",
+                         "title": f"{pc['leaves']} leave request{'s' if pc['leaves'] != 1 else ''} waiting",
+                         "detail": "Approve or reject in Leave & Unlock"})
     return {"count": sum(1 for i in items if i["level"] in {"high", "medium"}), "items": items, "today": h["today"]}

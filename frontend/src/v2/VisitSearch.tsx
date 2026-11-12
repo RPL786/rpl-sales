@@ -61,8 +61,26 @@ type Activity = {
   sales_person: string;
   from: string;
   to: string;
-  days: { date: string; weekday: string; visits: number; orders: number; entries: number; late_entries: number; sunday: boolean; future: boolean }[];
-  summary: { visits: number; orders: number; working_days: number; days_with_visits: number; days_without_visits: number; late_entries: number };
+  days: {
+    date: string;
+    weekday: string;
+    visits: number;
+    orders: number;
+    entries: number;
+    late_entries: number;
+    sunday: boolean;
+    future: boolean;
+    leave?: { reason: string; status: string } | null;
+  }[];
+  summary: {
+    visits: number;
+    orders: number;
+    working_days: number;
+    days_with_visits: number;
+    days_without_visits: number;
+    late_entries: number;
+    leave_days?: number;
+  };
   changes: { action: string; at: string; by: string; client_name: string; meeting_date: string }[];
 };
 
@@ -155,7 +173,8 @@ function ActivityPanel({ person, from, to, onClose }: { person: string; from: st
             <CalendarDays size={20} /> Activity calendar — {person}
           </h2>
           <p className="section-subtext">
-            Visits per day by meeting date. Red = working day with no visit. A dot means some entries were typed in on a later day.
+            Visits per day by meeting date. Red = working day with no visit, blue L = leave. A dot means some entries were
+            typed in on a later day.
           </p>
         </div>
         <button className="ghost-btn" onClick={onClose} aria-label="Close">
@@ -179,6 +198,11 @@ function ActivityPanel({ person, from, to, onClose }: { person: string; from: st
             <span className={data.summary.days_without_visits ? "warn" : ""}>
               <b>{data.summary.days_without_visits}</b> days without visits
             </span>
+            {(data.summary.leave_days || 0) > 0 && (
+              <span>
+                <b>{data.summary.leave_days}</b> leave days
+              </span>
+            )}
             {data.summary.late_entries > 0 && (
               <span>
                 <b>{data.summary.late_entries}</b> entered on a later day
@@ -207,14 +231,14 @@ function ActivityPanel({ person, from, to, onClose }: { person: string; from: st
                       <span
                         key={d.date}
                         className={`v2-cal-day ${d.sunday ? "off" : ""} ${d.future ? "future" : ""} ${
-                          !d.sunday && !d.future && !d.visits ? "none" : ""
-                        } ${d.visits ? "has" : ""}`}
+                          !d.sunday && !d.future && !d.visits && !d.leave ? "none" : ""
+                        } ${d.visits ? "has" : ""} ${d.leave ? "leave" : ""}`}
                         title={`${d.date} (${d.weekday}): ${d.visits} visits, ${d.orders} orders, ${d.entries} entered this day${
                           d.late_entries ? `, ${d.late_entries} entered late` : ""
-                        }`}
+                        }${d.leave ? ` — on leave (${d.leave.reason}, ${d.leave.status === "rejected" ? "not approved" : d.leave.status})` : ""}`}
                       >
                         <small>{Number(d.date.slice(8))}</small>
-                        <b>{d.visits || (d.sunday || d.future ? "" : "0")}</b>
+                        <b>{d.leave && !d.visits ? "L" : d.visits || (d.sunday || d.future ? "" : "0")}</b>
                         {d.late_entries > 0 && <i className="v2-cal-late" />}
                       </span>
                     ))}

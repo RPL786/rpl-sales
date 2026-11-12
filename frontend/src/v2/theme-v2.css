@@ -1744,3 +1744,32 @@ html[data-theme="day"] .v2-status.tone-warn { color: #b45309; }
 .v2-crash svg { color: #f59e0b; }
 .v2-crash h2 { margin: 0; }
 .v2-crash-msg { display: block; max-width: 100%; overflow-wrap: anywhere; font-size: 12px; padding: 8px 10px; border-radius: 8px; background: rgba(239, 68, 68, 0.1); color: #f87171; }
+
+/* ---- Visit date lock + Leave & Unlock ----------------------------------- */
+.v2-lock {
+  grid-column: 1 / -1; display: grid; gap: 8px; padding: 12px 14px; border-radius: 14px;
+  border: 1px solid rgba(245, 158, 11, 0.45); background: rgba(245, 158, 11, 0.08);
+}
+.v2-lock-head { display: flex; gap: 10px; align-items: flex-start; }
+.v2-lock-head svg { color: #f59e0b; flex: none; margin-top: 2px; }
+.v2-lock-head > div { display: grid; gap: 2px; }
+.v2-lock-head small { color: var(--muted, #94a3b8); }
+.v2-lock-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.v2-lock-form .filter-select { flex: 1 1 220px; }
+.v2-leave-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+.v2-leave-grid > .card { display: grid; gap: 12px; }
+.v2-leave-title { display: flex; align-items: center; gap: 8px; margin: 0; }
+.v2-leave-sub { margin: 6px 0 0; font-size: 14px; }
+.v2-leave-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.v2-leave-note { grid-column: 1 / -1; }
+.v2-leave-list { display: grid; gap: 8px; }
+.v2-leave-item {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px;
+}
+.v2-leave-item > div:first-child { display: grid; gap: 2px; flex: 1; min-width: 180px; }
+.v2-leave-item small { color: var(--muted, #94a3b8); }
+.v2-decide { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; width: 100%; justify-content: flex-end; }
+.v2-decide .filter-select { flex: 1 1 180px; max-width: 320px; }
+.v2-cal-day.leave { background: rgba(59, 130, 246, 0.16); border-color: rgba(59, 130, 246, 0.45); color: #60a5fa; }
+html[data-theme="day"] .v2-cal-day.leave { color: #1d4ed8; }

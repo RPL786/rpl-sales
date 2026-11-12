@@ -79,6 +79,8 @@ from v2.today import build_morning_report as v2_build_morning_report
 from v2.today import router as v2_today_router
 from v2.visits import router as v2_visits_router
 from v2.clientlog import router as v2_clientlog_router
+from v2 import attendance as v2_attendance
+from v2.attendance import router as v2_attendance_router
 from v2.names import router as v2_names_router
 from v2.imports import router as v2_imports_router
 from v2.db import transaction as v2_transaction
@@ -88,6 +90,7 @@ app.include_router(v2_names_router)
 app.include_router(v2_today_router)
 app.include_router(v2_visits_router)
 app.include_router(v2_clientlog_router)
+app.include_router(v2_attendance_router)
 
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
@@ -323,6 +326,7 @@ class VisitEntryRequest(BaseModel):
     next_meeting_date: str = ""
     next_meeting_time: str = ""
     notes: str = ""
+    saved_at: str = ""  # V2: when the visit was saved on the device (offline queue)
 
 class VisitBulkRequest(BaseModel):
     visits: List[VisitEntryRequest]
@@ -3654,6 +3658,8 @@ def create_visit_entry(payload: VisitEntryRequest, user: dict = Depends(get_curr
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        v2_attendance.check_visit_date(cur, user, row["sales_person"], row["meeting_date"], row["meeting_type"],
+                                       payload.saved_at)
         row["client_name"] = v2_names.canonical(cur, "client", row["client_name"])
         row["product"] = v2_names.canonical_products_text(cur, row["product"])
         cur.execute("""
@@ -3717,6 +3723,8 @@ def create_visit_entries_bulk(payload: VisitBulkRequest, user: dict = Depends(ge
     cur = conn.cursor()
 
     try:
+        for r in rows:
+            v2_attendance.check_visit_date(cur, user, r["sales_person"], r["meeting_date"], r["meeting_type"])
         client_map = v2_names.canonical_map(cur, "client", [r["client_name"] for r in rows])
         for r in rows:
             r["client_name"] = client_map.get(r["client_name"], r["client_name"])

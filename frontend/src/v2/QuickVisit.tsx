@@ -15,6 +15,7 @@ import { apiJson } from "./authFetch";
 import { OfflineError, enqueueVisit, flushQueue, postVisit, readQueue } from "./offlineQueue";
 import NameHint from "./NameHint";
 import VoiceButton from "./VoiceButton";
+import DateLockNotice from "./VisitLock";
 
 export type VisitPrefill = {
   key: number;
@@ -344,6 +345,7 @@ export default function QuickVisit({ canChooseOwner, onSaved, prefill }: Props) 
           <input className="filter-select v2-qv-input" type="date" value={form.meeting_date} onChange={(e) => set("meeting_date", e.target.value)} />
           <input className="filter-select v2-qv-input" type="time" value={form.meeting_time} onChange={(e) => set("meeting_time", e.target.value)} />
         </div>
+        <DateLockNotice date={form.meeting_date} meetingType={form.meeting_type} />
         <div className="v2-seg v2-qv-seg">
           {MEETING_TYPES.map((t) => (
             <button key={t} className={form.meeting_type === t ? "active" : ""} onClick={() => set("meeting_type", t)}>

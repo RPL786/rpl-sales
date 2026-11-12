@@ -60,6 +60,7 @@ const DangerZone = lazy(() => import("./v2/DangerZone"));
 const HomePage = lazy(() => import("./v2/HomePage"));
 const QuickVisit = lazy(() => import("./v2/QuickVisit"));
 const VisitSearch = lazy(() => import("./v2/VisitSearch"));
+const LeavePage = lazy(() => import("./v2/LeavePage"));
 const DataHealth = lazy(() => import("./v2/DataHealth"));
 
 // Tabs that use the Global Filters (team / city / branch / salesperson / month / products)
@@ -73,7 +74,7 @@ import { ArrowUpRight, Building2, CalendarClock, ClipboardList, Contact, House, 
 import ActionMenu from "./v2/ActionMenu";
 import NotificationBell from "./v2/NotificationBell";
 import { canInstall, isStandalone, promptInstall } from "./v2/pwa";
-import { ClipboardPlus, Grid3x3, ShieldCheck, Smartphone } from "lucide-react";
+import { CalendarOff, ClipboardPlus, Grid3x3, ShieldCheck, Smartphone } from "lucide-react";
 
 type ClientStatus = "new" | "lost" | "retained";
 type Severity = "high" | "medium" | "low";
@@ -92,7 +93,7 @@ const TabFallback = () => (
   </div>
 );
 
-type TabKey = "overview" | "clients" | "products" | "team" | "recovery" | "executive" | "visit" | "dataEntry" | "admin" | "forecast" | "productContribution" | "organization" | "multiYear" | "planner" | "customers" | "home" | "dataHealth";
+type TabKey = "overview" | "clients" | "products" | "team" | "recovery" | "executive" | "visit" | "dataEntry" | "admin" | "forecast" | "productContribution" | "organization" | "multiYear" | "planner" | "customers" | "home" | "dataHealth" | "leave";
 
 type OrgTreeTeam = { id: number; name: string; branch_id: number | null };
 type OrgTreeBranch = { id: number; city_id: number; name: string; code: string; teams: OrgTreeTeam[] };
@@ -114,7 +115,7 @@ const NAV_GROUPS: { key: string; label: string; tabs: TabKey[] }[] = [
     label: "Sales Intelligence",
     tabs: ["overview", "multiYear", "clients", "products", "team", "recovery", "executive", "forecast", "productContribution"],
   },
-  { key: "field", label: "Field Operations", tabs: ["planner", "visit", "dataEntry"] },
+  { key: "field", label: "Field Operations", tabs: ["planner", "visit", "dataEntry", "leave"] },
   { key: "crm", label: "Customers", tabs: ["customers"] },
   { key: "admin", label: "Administration", tabs: ["admin", "organization", "dataHealth"] },
 ];
@@ -619,12 +620,13 @@ if (!authUser) {
     { key: "customers", label: "Customer 360", icon: <Contact size={16} /> },
     { key: "home", label: "Home", icon: <House size={16} /> },
     { key: "dataHealth", label: "Data Health", icon: <ShieldCheck size={16} /> },
+    { key: "leave", label: "Leave & Unlock", icon: <CalendarOff size={16} /> },
   ];
 
   const visibleTabs = tabs.filter((tab) => {
     if (tab.key === "admin" || tab.key === "organization" || tab.key === "dataHealth") return isAdmin;
     if (canViewDashboards) return true;
-    return ["home", "visit", "dataEntry", "planner", "customers"].includes(tab.key);
+    return ["home", "visit", "dataEntry", "planner", "customers", "leave"].includes(tab.key);
   });
   const visibleGroups = NAV_GROUPS.map((g) => ({
     ...g,
@@ -2964,6 +2966,7 @@ const productSelectionLabel =
             )}
             {activeTab === "organization" && isAdmin && <OrgAdmin />}
             {activeTab === "dataHealth" && isAdmin && <DataHealth />}
+            {activeTab === "leave" && <LeavePage role={userRole || ""} />}
             {activeTab === "multiYear" && canViewDashboards && (
               orgFilterActive && !selectedTeam && visibleTeams.length === 0 ? (
                 <div className="card"><p className="org-muted">No teams are mapped to this city/branch yet.</p></div>

@@ -61,6 +61,13 @@ import api  # noqa: E402
 ADMIN = (os.getenv("ADMIN_USERNAME", "admin"), os.getenv("ADMIN_PASSWORD", "admin123"))
 
 
+@pytest.fixture(autouse=True)
+def _wide_visit_window(monkeypatch):
+    """Older tests enter visits on fixed past dates; the date lock has its own tests."""
+    import v2.attendance as att
+    monkeypatch.setattr(att, "WINDOW_WORKING_DAYS", 800)
+
+
 @pytest.fixture(scope="module")
 def client():
     with TestClient(api.app) as c:
@@ -978,3 +985,90 @@ def test_forecast_keeps_person_after_role_round_trip(client, admin):
     rows = client.get(f"/forecast?team=team fc (tile adhesive)&month={mon}&year={t.year}", headers=admin).json()
     me = next(x for x in rows if x["username"] == "FC SELLER")
     assert me["sales_target"] == 500
+
+
+# ---------------------------------------------------------------------------
+# Visit date lock, unlock requests, leave
+# ---------------------------------------------------------------------------
+
+def test_visit_lock_unlock_and_leave(client, admin, org, monkeypatch):
+    from datetime import date
+    import v2.attendance as att
+    monkeypatch.setattr(att, "WINDOW_WORKING_DAYS", 2)
+    monday = date(2026, 11, 9)
+    monkeypatch.setattr(att, "_today", lambda: monday)
+    assert [d.isoformat() for d in att.allowed_dates(monday)] == ["2026-11-09", "2026-11-07", "2026-11-06"]
+
+    ali = login(client, "ali", "pass1234")
+    base = {"team": "Tile Adhesive", "sales_person": "ali", "client_name": "Lock Co", "client_category": "",
+            "product": "TA-100", "meeting_time": "10:00", "meeting_type": "Initial Visit",
+            "meeting_status": "Interested", "client_response": "", "notes": ""}
+    post = lambda d, h=ali, **kw: client.post("/api/visit-entry", headers=h, json={**base, "meeting_date": d, **kw})
+
+    assert post("2026-11-09").status_code == 200
+    assert post("2026-11-06").status_code == 200          # Friday: Sunday is not counted
+    r = post("2026-11-05")
+    assert r.status_code == 403 and "locked" in r.json()["detail"]
+    assert post("2026-11-12").status_code == 400          # future, not a plan
+    assert post("2026-11-12", meeting_type="Future Scheduled").status_code == 200
+    # offline: saved on the device on Thursday 5 Nov, synced on Monday
+    assert post("2026-11-04", saved_at="2026-11-05T06:00:00Z").status_code == 200
+    # bulk grid is locked too
+    bulk = client.post("/api/visit-entries/bulk", headers=ali, json={"visits": [{**base, "meeting_date": "2026-11-02"}]})
+    assert bulk.status_code == 403
+    # admin and city coordinator are not locked
+    assert post("2026-11-02", h=admin).status_code == 200
+
+    st = client.get("/api/v2/visit-lock", headers=ali).json()
+    assert st["earliest_allowed"] == "2026-11-06" and not st["exempt"]
+
+    # unlock request
+    assert client.post("/api/v2/visit-unlock/requests", headers=ali, json={"date": "2026-11-07", "reason": "forgot"}).status_code == 400
+    assert client.post("/api/v2/visit-unlock/requests", headers=ali, json={"date": "2026-11-05", "reason": "x"}).status_code == 400
+    r = client.post("/api/v2/visit-unlock/requests", headers=ali, json={"date": "2026-11-05", "reason": "No signal at site"})
+    assert r.status_code == 200
+    rid = r.json()["id"]
+    assert client.post("/api/v2/visit-unlock/requests", headers=ali,
+                       json={"date": "2026-11-05", "reason": "again please"}).status_code == 400
+    # team leader may see but not unlock; coordinator of Karachi can
+    tl = login(client, "saddam", "pass1234")
+    lst = client.get("/api/v2/visit-unlock/requests", headers=tl).json()["requests"]
+    assert any(x["id"] == rid and not x["can_decide"] for x in lst)
+    assert client.post(f"/api/v2/visit-unlock/requests/{rid}/decide", headers=tl, json={"approve": True}).status_code == 403
+    assert client.get("/api/v2/visit-unlock/requests", headers=ali).status_code == 403
+    coord = login(client, "khi_coord", "pass1234")
+    n = client.get("/api/v2/notifications", headers=coord).json()
+    assert any(i["kind"] == "unlock" for i in n["items"])
+    assert client.post(f"/api/v2/visit-unlock/requests/{rid}/decide", headers=coord, json={"approve": True}).status_code == 200
+    assert post("2026-11-05").status_code == 200
+    assert "2026-11-05" in client.get("/api/v2/visit-lock", headers=ali).json()["open_unlocks"]
+    assert client.post(f"/api/v2/visit-unlock/requests/{rid}/decide", headers=coord, json={"approve": False}).status_code == 400
+
+    # leave: always shown, approval separate
+    r = client.post("/api/v2/leaves", headers=ali, json={"date_from": "2026-10-27", "date_to": "2026-10-27",
+                                                          "reason_type": "Sick", "note": "fever"})
+    assert r.status_code == 200, r.text
+    lid = r.json()["id"]
+    assert client.post("/api/v2/leaves", headers=ali, json={"date_from": "2026-10-27", "reason_type": "Sick"}).status_code == 400
+    assert client.post("/api/v2/leaves", headers=ali, json={"date_from": "2026-11-09", "reason_type": "Sick"}).status_code == 400  # visits that day
+    assert client.post("/api/v2/leaves", headers=ali, json={"date_from": "2026-11-10", "reason_type": "Other"}).status_code == 400  # needs note
+    # no visit on a leave day, even by unlock
+    assert post("2026-10-27", h=admin).status_code == 403
+    mine = client.get("/api/v2/leaves?mine=true", headers=ali).json()["leaves"]
+    assert any(l["id"] == lid and l["status"] == "pending" for l in mine)
+    # team leader can approve their team's leave
+    assert any(l["id"] == lid and l["can_decide"] for l in client.get("/api/v2/leaves", headers=tl).json()["leaves"])
+    assert client.post(f"/api/v2/leaves/{lid}/decide", headers=tl, json={"approve": False, "note": "no doctor note"}).status_code == 200
+    l = next(x for x in client.get("/api/v2/leaves?mine=true", headers=ali).json()["leaves"] if x["id"] == lid)
+    assert l["status"] == "rejected" and l["decision_note"] == "no doctor note"
+    assert client.post(f"/api/v2/leaves/{lid}/decide", headers=coord, json={"approve": True}).status_code == 200
+    # shows in the activity calendar
+    act = client.get("/api/v2/visits/activity?sales_person=ali&date_from=2026-10-20&date_to=2026-11-09", headers=admin).json()
+    d3 = next(d for d in act["days"] if d["date"] == "2026-10-27")
+    assert d3["leave"] == {"reason": "Sick", "status": "approved"} and act["summary"]["leave_days"] == 1
+    # approved leave can't be cancelled by the user, admin can
+    assert client.delete(f"/api/v2/leaves/{lid}", headers=ali).status_code == 400
+    assert client.delete(f"/api/v2/leaves/{lid}", headers=admin).status_code == 200
+    # another member cannot see ali's leave
+    assert all(x["username"] != "ali" for x in client.get("/api/v2/leaves", headers=login(client, "boss", "pass1234")).json()["leaves"]
+               if x["status"] == "cancelled")
