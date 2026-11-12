@@ -77,7 +77,8 @@ export async function flushQueue(): Promise<{ sent: number; failed: number; left
     while (items.length) {
       const [first, ...rest] = items;
       try {
-        await postVisit(first.payload);
+        // the server judges the date lock by when the visit was saved on the device
+        await postVisit({ ...first.payload, saved_at: first.queued_at });
         sent += 1;
       } catch (e) {
         if (e instanceof OfflineError) break;

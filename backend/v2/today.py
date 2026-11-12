@@ -250,6 +250,11 @@ def build_morning_report(report_day: Optional[date] = None) -> Dict:
             ((today - timedelta(days=30)).isoformat(), today.isoformat(), (today - timedelta(days=3)).isoformat()),
         )
         no_visits = [{"sales_person": p, "last_visit": d} for p, d in cur.fetchall() if p]
+        from .attendance import people_on_leave
+        on_leave = people_on_leave(cur, today)
+        on_leave_y = people_on_leave(cur, yesterday)
+        no_visits = [p for p in no_visits if p["sales_person"].strip().lower() not in on_leave
+                     and p["sales_person"].strip().lower() not in on_leave_y]
 
         quiet = _quiet_customers(cur, access, "", today, limit=5)
 
@@ -309,6 +314,11 @@ def build_morning_report(report_day: Optional[date] = None) -> Dict:
         L.append("*No visits for 3+ days*")
         L.append(", ".join(f"{p['sales_person']} (last {_day(p['last_visit'])})" for p in no_visits[:8]))
         L.append("")
+    if on_leave:
+        L.append("*On leave today*")
+        L.append(", ".join(f"{v['username']} ({v['reason']}{'' if v['status'] == 'approved' else ', ' + v['status']})"
+                           for v in on_leave.values()))
+        L.append("")
     fu = plan["summary"]
     n_due = fu["followups_due_today"]
     L.append(f"*Today*: {n_due} follow-up{'s' if n_due != 1 else ''} due, {fu['followups_overdue']} overdue.")
@@ -324,6 +334,7 @@ def build_morning_report(report_day: Optional[date] = None) -> Dict:
         "teams_behind": [t["team"] for t in behind],
         "quiet_customers": [{**q, "last_order": q["last_order"].isoformat()} for q in quiet[:5]],
         "people_without_visits": no_visits,
+        "on_leave_today": list(on_leave.values()),
         "followups": {"due_today": fu["followups_due_today"], "overdue": fu["followups_overdue"]},
         "text": "\n".join(L).strip(),
     }

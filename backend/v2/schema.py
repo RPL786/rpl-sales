@@ -129,6 +129,44 @@ DDL = [
     "ALTER TABLE sales_entries ADD COLUMN IF NOT EXISTS import_id BIGINT",
     "CREATE INDEX IF NOT EXISTS idx_sales_entries_import ON sales_entries (import_id) WHERE import_id IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS idx_sales_entries_team_date ON sales_entries (team, entry_date)",
+    # --- Visit date lock: unlock requests ---------------------------------------
+    """
+    CREATE TABLE IF NOT EXISTS visit_unlocks (
+        id BIGSERIAL PRIMARY KEY,
+        user_id INTEGER,
+        username TEXT NOT NULL,
+        team TEXT NOT NULL DEFAULT '',
+        unlock_date DATE NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+        requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        decided_by TEXT,
+        decided_at TIMESTAMPTZ,
+        decision_note TEXT,
+        expires_at TIMESTAMPTZ
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_visit_unlocks_user_date ON visit_unlocks (LOWER(TRIM(username)), unlock_date)",
+    # --- Leave --------------------------------------------------------------------
+    """
+    CREATE TABLE IF NOT EXISTS leaves (
+        id BIGSERIAL PRIMARY KEY,
+        user_id INTEGER,
+        username TEXT NOT NULL,
+        team TEXT NOT NULL DEFAULT '',
+        date_from DATE NOT NULL,
+        date_to DATE NOT NULL,
+        reason_type TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+        created_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        decided_by TEXT,
+        decided_at TIMESTAMPTZ,
+        decision_note TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_leaves_user_dates ON leaves (LOWER(TRIM(username)), date_from, date_to)",
 ]
 
 

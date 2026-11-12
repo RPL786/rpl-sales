@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import VoiceButton from "../v2/VoiceButton";
 import VisitSearch from "../v2/VisitSearch";
+import DateLockNotice from "../v2/VisitLock";
 
 const API_BASE_URL = "";
 
@@ -635,6 +636,7 @@ export default function VisitForm() {
         )}
 
         <input className="filter-select" type="date" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} />
+        <DateLockNotice date={meetingDate} />
 
         <div style={{ display: "flex", gap: 8 }}>
           <input
