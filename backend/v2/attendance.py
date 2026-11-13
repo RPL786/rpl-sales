@@ -42,12 +42,16 @@ LEAVE_REASONS = ["Sick", "Personal", "Family", "Training / office work", "Public
 # ---------------------------------------------------------------------------
 
 def allowed_dates(today: date) -> List[date]:
-    """Today plus the previous WINDOW_WORKING_DAYS days that are not Sundays."""
-    out, d = [today], today
-    while len(out) < WINDOW_WORKING_DAYS + 1:
+    """Today and every day back to the WINDOW_WORKING_DAYS-th previous working day.
+
+    Sundays are not counted towards the window, but a Sunday inside it stays open
+    (someone who worked on Sunday can still log it)."""
+    out, d, working = [today], today, 0
+    while working < WINDOW_WORKING_DAYS:
         d -= timedelta(days=1)
+        out.append(d)
         if d.weekday() != 6:
-            out.append(d)
+            working += 1
     return out
 
 
