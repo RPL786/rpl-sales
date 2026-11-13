@@ -997,7 +997,7 @@ def test_visit_lock_unlock_and_leave(client, admin, org, monkeypatch):
     monkeypatch.setattr(att, "WINDOW_WORKING_DAYS", 2)
     monday = date(2026, 11, 9)
     monkeypatch.setattr(att, "_today", lambda: monday)
-    assert [d.isoformat() for d in att.allowed_dates(monday)] == ["2026-11-09", "2026-11-07", "2026-11-06"]
+    assert [d.isoformat() for d in att.allowed_dates(monday)] == ["2026-11-09", "2026-11-08", "2026-11-07", "2026-11-06"]
 
     ali = login(client, "ali", "pass1234")
     base = {"team": "Tile Adhesive", "sales_person": "ali", "client_name": "Lock Co", "client_category": "",
@@ -1072,3 +1072,29 @@ def test_visit_lock_unlock_and_leave(client, admin, org, monkeypatch):
     # another member cannot see ali's leave
     assert all(x["username"] != "ali" for x in client.get("/api/v2/leaves", headers=login(client, "boss", "pass1234")).json()["leaves"]
                if x["status"] == "cancelled")
+
+
+def test_report_status_missing_and_leave(client, admin, org):
+    # ali: visits on some days, a leave on another; the rest of the working days are "missing"
+    _raw_sql("UPDATE user_team_history SET start_date = '2026-01-01' WHERE LOWER(username) = 'ali'")
+    r = client.get("/api/v2/visits/report-status?date_from=2026-10-26&date_to=2026-11-01", headers=admin).json()
+    ali = next(p for p in r["people"] if p["username"] == "ali")
+    by = {c["date"]: c for c in ali["days"]}
+    assert by["2026-11-01"]["status"] == "off"            # Sunday
+    assert by["2026-10-28"]["status"] in {"missing", "reported", "leave"}
+    raw_leave = client.post("/api/v2/leaves", headers=login(client, "ali", "pass1234"),
+                            json={"date_from": "2026-10-30", "reason_type": "Personal", "note": "bank work"})
+    assert raw_leave.status_code == 200, raw_leave.text
+    r = client.get("/api/v2/visits/report-status?date_from=2026-10-26&date_to=2026-11-01", headers=admin).json()
+    ali = next(p for p in r["people"] if p["username"] == "ali")
+    c30 = next(c for c in ali["days"] if c["date"] == "2026-10-30")
+    assert c30["status"] == "leave" and c30["leave"]["status"] == "pending" and c30["leave"]["reason"] == "Personal"
+    assert any(m["username"] == "ali" and m["date"] == "2026-10-30" for m in r["on_leave"])
+    assert not any(m["username"] == "ali" and m["date"] == "2026-10-30" for m in r["missing"])
+    # members see only themselves; Lahore team is not in the Karachi coordinator's view
+    me = client.get("/api/v2/visits/report-status", headers=login(client, "ali", "pass1234")).json()
+    assert [p["username"] for p in me["people"]] == ["ali"]
+    coord = client.get("/api/v2/visits/report-status", headers=login(client, "khi_coord", "pass1234")).json()
+    assert all(p["team"] != "Lahore Team" for p in coord["people"])
+    x = client.get("/api/v2/visits/report-status/export?date_from=2026-10-26&date_to=2026-11-01", headers=admin)
+    assert x.status_code == 200 and x.content[:2] == b"PK"

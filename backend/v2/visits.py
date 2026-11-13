@@ -346,3 +346,190 @@ def export_visits(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Daily report status: who reported, who was on leave, who is missing
+# ---------------------------------------------------------------------------
+
+def _report_status(access: Access, team: str, date_from: str, date_to: str):
+    today = _today()
+    try:
+        start = date.fromisoformat(date_from[:10]) if date_from else today.replace(day=1)
+        end = date.fromisoformat(date_to[:10]) if date_to else today
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    if end < start:
+        start, end = end, start
+    end = min(end, today)
+    if (end - start).days > 92:
+        raise HTTPException(status_code=400, detail="Choose a period of up to 3 months")
+
+    with transaction() as cur:
+        # field people (salespersons and team leaders) in scope, with their team membership dates
+        cur.execute(
+            """SELECT u.username, COALESCE(u.team, ''), u.role,
+                      MIN(h.start_date), MAX(COALESCE(h.end_date, '9999-12-31'))
+               FROM users u
+               LEFT JOIN user_team_history h ON h.user_id = u.id
+               WHERE u.role IN ('user', 'team_leader') AND COALESCE(u.is_active, TRUE)
+               GROUP BY u.username, u.team, u.role
+               ORDER BY LOWER(COALESCE(u.team, '')), LOWER(u.username)"""
+        )
+        people = []
+        for uname, uteam, role, hs, he in cur.fetchall():
+            if access.role == "user" and uname.strip().lower() != access.username.strip().lower():
+                continue
+            if access.role != "user" and not access.allows_team(uteam):
+                continue
+            if team and uteam.strip().lower() != team.strip().lower():
+                continue
+            people.append({"username": uname, "team": uteam, "role": role,
+                           "from": (hs or "1900-01-01")[:10], "to": (he or "9999-12-31")[:10]})
+        keys = [p["username"].strip().lower() for p in people]
+        visits = {}
+        leaves = {}
+        if keys:
+            cur.execute(
+                """SELECT LOWER(TRIM(sales_person)), LEFT(meeting_date, 10), COUNT(*)
+                   FROM visit_entries
+                   WHERE LOWER(TRIM(sales_person)) = ANY(%s) AND LEFT(meeting_date, 10) BETWEEN %s AND %s
+                     AND LOWER(COALESCE(meeting_type, '')) NOT LIKE 'future%%'
+                   GROUP BY 1, 2""",
+                (keys, start.isoformat(), end.isoformat()),
+            )
+            visits = {(k, d): int(n) for k, d, n in cur.fetchall()}
+            cur.execute(
+                """SELECT LOWER(TRIM(username)), date_from, date_to, reason_type, note, status FROM leaves
+                   WHERE LOWER(TRIM(username)) = ANY(%s) AND status <> 'cancelled'
+                     AND date_from <= %s AND date_to >= %s""",
+                (keys, end.isoformat(), start.isoformat()),
+            )
+            for k, f, t, reason, note, st in cur.fetchall():
+                d = max(f, start)
+                while d <= min(t, end):
+                    leaves[(k, d.isoformat())] = {"reason": reason, "note": note, "status": st}
+                    d += timedelta(days=1)
+
+    days = []
+    d = start
+    while d <= end:
+        days.append(d)
+        d += timedelta(days=1)
+
+    rows, missing = [], []
+    for p in people:
+        k = p["username"].strip().lower()
+        cells, tot = [], {"reported": 0, "leave": 0, "missing": 0}
+        for day in days:
+            iso = day.isoformat()
+            n = visits.get((k, iso), 0)
+            lv = leaves.get((k, iso))
+            if iso < p["from"] or iso > p["to"]:
+                status = "na"
+            elif n:
+                status = "reported"
+            elif lv:
+                status = "leave"
+            elif day.weekday() == 6:
+                status = "off"
+            elif day == today:
+                status = "today"  # the day is not over yet: not counted as missing
+            else:
+                status = "missing"
+            cell = {"date": iso, "status": status, "visits": n}
+            if lv:
+                cell["leave"] = lv
+            if status in tot:
+                tot[status] += 1
+            if status == "missing":
+                missing.append({"date": iso, "weekday": day.strftime("%a"), "username": p["username"], "team": p["team"]})
+            cells.append(cell)
+        rows.append({**p, "days": cells, "totals": tot})
+
+    leave_list = [
+        {"date": c["date"], "username": r["username"], "team": r["team"], **c["leave"]}
+        for r in rows for c in r["days"] if c["status"] == "leave"
+    ]
+    return start, end, days, rows, missing, leave_list
+
+
+@router.get("/report-status")
+def report_status(team: str = "", date_from: str = "", date_to: str = "", access: Access = Depends(get_access)):
+    start, end, days, rows, missing, leave_list = _report_status(access, team, date_from, date_to)
+    return {
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "dates": [{"date": d.isoformat(), "weekday": d.strftime("%a"), "sunday": d.weekday() == 6} for d in days],
+        "people": rows,
+        "missing": sorted(missing, key=lambda m: (m["date"], m["username"].lower()), reverse=True),
+        "on_leave": sorted(leave_list, key=lambda m: (m["date"], m["username"].lower()), reverse=True),
+        "summary": {
+            "people": len(rows),
+            "reported_days": sum(r["totals"]["reported"] for r in rows),
+            "leave_days": sum(r["totals"]["leave"] for r in rows),
+            "missing_days": len(missing),
+        },
+    }
+
+
+@router.get("/report-status/export")
+def report_status_export(team: str = "", date_from: str = "", date_to: str = "", access: Access = Depends(get_access)):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+
+    start, end, days, rows, missing, leave_list = _report_status(access, team, date_from, date_to)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Daily status"
+    ws.append(["Salesperson", "Team"] + [d.strftime("%d %b %a") for d in days] + ["Reported", "Leave", "Missing"])
+    for c in ws[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="F97316")
+    fills = {"missing": "FECACA", "leave": "BFDBFE", "reported": "BBF7D0", "off": "E5E7EB", "na": "F3F4F6",
+             "today": "FFFFFF"}
+    for r in rows:
+        vals = []
+        for c in r["days"]:
+            if c["status"] == "reported":
+                vals.append(c["visits"])
+            elif c["status"] == "leave":
+                st = c["leave"]["status"]
+                vals.append(f"Leave ({c['leave']['reason']}{'' if st == 'approved' else ', ' + ('not approved' if st == 'rejected' else st)})")
+            elif c["status"] == "missing":
+                vals.append("Missing")
+            elif c["status"] == "off":
+                vals.append("Sunday")
+            elif c["status"] == "today":
+                vals.append("Today")
+            else:
+                vals.append("")
+        ws.append([r["username"], r["team"]] + vals + [r["totals"]["reported"], r["totals"]["leave"], r["totals"]["missing"]])
+        row_idx = ws.max_row
+        for i, c in enumerate(r["days"]):
+            ws.cell(row=row_idx, column=3 + i).fill = PatternFill("solid", fgColor=fills[c["status"]])
+    ws.freeze_panes = "C2"
+    ws.column_dimensions["A"].width = 22
+    ws.column_dimensions["B"].width = 24
+
+    ws2 = wb.create_sheet("Missing reports")
+    ws2.append(["Date", "Day", "Salesperson", "Team"])
+    for m in sorted(missing, key=lambda m: (m["date"], m["username"].lower())):
+        ws2.append([m["date"], m["weekday"], m["username"], m["team"]])
+    ws3 = wb.create_sheet("Leave")
+    ws3.append(["Date", "Salesperson", "Team", "Reason", "Details", "Approval"])
+    for l in sorted(leave_list, key=lambda m: (m["date"], m["username"].lower())):
+        ws3.append([l["date"], l["username"], l["team"], l["reason"], l["note"],
+                    "Not approved" if l["status"] == "rejected" else l["status"].title()])
+    for w in (ws2, ws3):
+        for c in w[1]:
+            c.font = Font(bold=True)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="report_status_{start}_to_{end}.xlsx"'},
+    )

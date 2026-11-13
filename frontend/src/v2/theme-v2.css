@@ -1773,3 +1773,36 @@ html[data-theme="day"] .v2-status.tone-warn { color: #b45309; }
 .v2-decide .filter-select { flex: 1 1 180px; max-width: 320px; }
 .v2-cal-day.leave { background: rgba(59, 130, 246, 0.16); border-color: rgba(59, 130, 246, 0.45); color: #60a5fa; }
 html[data-theme="day"] .v2-cal-day.leave { color: #1d4ed8; }
+
+/* ---- Daily report status grid -------------------------------------------- */
+.v2-rs-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 12px; color: var(--muted, #94a3b8); }
+.v2-rs-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.v2-rs-wrap { overflow-x: auto; }
+.v2-rs-table { border-collapse: separate; border-spacing: 2px; font-size: 12px; min-width: 100%; }
+.v2-rs-table th { font-weight: 600; text-align: center; padding: 4px 2px; white-space: nowrap; color: var(--muted, #94a3b8); }
+.v2-rs-table th small { display: block; font-size: 9px; font-weight: 500; }
+.v2-rs-table th.rs-sun { opacity: 0.55; }
+.v2-rs-table td { text-align: center; padding: 1px; }
+.v2-rs-table .rs-sticky {
+  position: sticky; left: 0; z-index: 1; text-align: left; padding: 4px 10px 4px 4px; white-space: nowrap;
+  background: var(--v2-sidebar, var(--card, #1f1f23));
+}
+.v2-rs-table .rs-sticky small { color: var(--accent); font-weight: 700; }
+.v2-rs-table tr.rs-team td { padding-top: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); font-weight: 700; }
+.rs-cell {
+  display: inline-grid; place-items: center; width: 26px; height: 24px; border-radius: 6px;
+  font-size: 11px; font-weight: 700; font-style: normal; border: 1px solid transparent;
+}
+.rs-cell.reported { background: rgba(34, 197, 94, 0.18); color: #22c55e; }
+.rs-cell.missing { background: rgba(239, 68, 68, 0.16); color: #ef4444; }
+.rs-cell.leave { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+.rs-cell.leave.pending { background: transparent; border: 1px dashed #60a5fa; }
+.rs-cell.leave.rejected { border: 1px solid #ef4444; }
+.rs-cell.off { background: rgba(148, 163, 184, 0.12); }
+.rs-cell.na { background: transparent; }
+.rs-num { font-weight: 700; padding: 0 6px !important; }
+.rs-blue { color: #60a5fa; }
+.rs-red { color: #ef4444; }
+html[data-theme="day"] .rs-cell.reported { color: #047857; }
+html[data-theme="day"] .rs-cell.leave, html[data-theme="day"] .rs-blue { color: #1d4ed8; }
+.rs-cell.today { border: 1px dashed var(--line); color: var(--muted, #94a3b8); }
