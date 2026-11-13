@@ -420,10 +420,11 @@ def _report_status(access: Access, team: str, date_from: str, date_to: str):
     rows, missing = [], []
     for p in people:
         k = p["username"].strip().lower()
-        cells, tot = [], {"reported": 0, "leave": 0, "missing": 0}
+        cells, tot = [], {"reported": 0, "leave": 0, "missing": 0, "visits": 0}
         for day in days:
             iso = day.isoformat()
             n = visits.get((k, iso), 0)
+            tot["visits"] += n
             lv = leaves.get((k, iso))
             if iso < p["from"] or iso > p["to"]:
                 status = "na"
@@ -467,6 +468,7 @@ def report_status(team: str = "", date_from: str = "", date_to: str = "", access
         "summary": {
             "people": len(rows),
             "reported_days": sum(r["totals"]["reported"] for r in rows),
+            "visits": sum(r["totals"]["visits"] for r in rows),
             "leave_days": sum(r["totals"]["leave"] for r in rows),
             "missing_days": len(missing),
         },
@@ -482,7 +484,8 @@ def report_status_export(team: str = "", date_from: str = "", date_to: str = "",
     wb = Workbook()
     ws = wb.active
     ws.title = "Daily status"
-    ws.append(["Salesperson", "Team"] + [d.strftime("%d %b %a") for d in days] + ["Reported", "Leave", "Missing"])
+    ws.append(["Salesperson", "Team"] + [d.strftime("%d %b %a") for d in days]
+              + ["Total visits", "Days reported", "Leave days", "Missing days"])
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor="F97316")
@@ -504,7 +507,8 @@ def report_status_export(team: str = "", date_from: str = "", date_to: str = "",
                 vals.append("Today")
             else:
                 vals.append("")
-        ws.append([r["username"], r["team"]] + vals + [r["totals"]["reported"], r["totals"]["leave"], r["totals"]["missing"]])
+        ws.append([r["username"], r["team"]] + vals
+                  + [r["totals"]["visits"], r["totals"]["reported"], r["totals"]["leave"], r["totals"]["missing"]])
         row_idx = ws.max_row
         for i, c in enumerate(r["days"]):
             ws.cell(row=row_idx, column=3 + i).fill = PatternFill("solid", fgColor=fills[c["status"]])

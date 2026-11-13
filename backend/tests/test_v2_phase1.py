@@ -1087,6 +1087,8 @@ def test_report_status_missing_and_leave(client, admin, org):
     assert raw_leave.status_code == 200, raw_leave.text
     r = client.get("/api/v2/visits/report-status?date_from=2026-10-26&date_to=2026-11-01", headers=admin).json()
     ali = next(p for p in r["people"] if p["username"] == "ali")
+    assert ali["totals"]["visits"] == sum(c["visits"] for c in ali["days"])
+    assert r["summary"]["visits"] == sum(p["totals"]["visits"] for p in r["people"])
     c30 = next(c for c in ali["days"] if c["date"] == "2026-10-30")
     assert c30["status"] == "leave" and c30["leave"]["status"] == "pending" and c30["leave"]["reason"] == "Personal"
     assert any(m["username"] == "ali" and m["date"] == "2026-10-30" for m in r["on_leave"])

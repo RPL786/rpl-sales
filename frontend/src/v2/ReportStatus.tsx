@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { ClipboardCheck, FileSpreadsheet, Loader2, RefreshCw } from "lucide-react";
+import { createPortal } from "react-dom";
+import { ClipboardCheck, FileSpreadsheet, Loader2, RefreshCw, X } from "lucide-react";
 import { apiBaseUrl, apiJson } from "./authFetch";
+import VisitSearch from "./VisitSearch";
 
 type Cell = {
   date: string;
@@ -13,7 +15,7 @@ type Person = {
   team: string;
   role: string;
   days: Cell[];
-  totals: { reported: number; leave: number; missing: number };
+  totals: { reported: number; leave: number; missing: number; visits: number };
 };
 type Data = {
   from: string;
@@ -22,7 +24,7 @@ type Data = {
   people: Person[];
   missing: { date: string; weekday: string; username: string; team: string }[];
   on_leave: { date: string; username: string; team: string; reason: string; note: string; status: string }[];
-  summary: { people: number; reported_days: number; leave_days: number; missing_days: number };
+  summary: { people: number; reported_days: number; leave_days: number; missing_days: number; visits: number };
 };
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -46,7 +48,8 @@ function presets() {
 }
 
 /** For every salesperson and day: reported (visits), on leave (with approval), Sunday, or missing. */
-export default function ReportStatus() {
+export default function ReportStatus({ isAdmin = false }: { isAdmin?: boolean }) {
+  const [detail, setDetail] = useState<{ person: string; from: string; to: string; label: string } | null>(null);
   const [range, setRange] = useState(presets()[1]);
   const [team, setTeam] = useState("");
   const [data, setData] = useState<Data | null>(null);
@@ -146,6 +149,9 @@ export default function ReportStatus() {
               </span>
             )}
             <span>
+              <b>{s.visits}</b> total visits
+            </span>
+            <span>
               <b>{s.reported_days}</b> days reported
             </span>
             <span>
@@ -181,7 +187,8 @@ export default function ReportStatus() {
                       {Number(d.date.slice(8))}
                     </th>
                   ))}
-                  <th>Rep.</th>
+                  <th title="Total visits in this period">Visits</th>
+                  <th title="Days with at least one visit">Days</th>
                   <th>Leave</th>
                   <th>Miss.</th>
                 </tr>
@@ -194,18 +201,30 @@ export default function ReportStatus() {
                         <td className="rs-sticky" colSpan={1}>
                           {teamName}
                         </td>
-                        <td colSpan={data.dates.length + 3} />
+                        <td colSpan={data.dates.length + 4} />
                       </tr>
                     )}
                     {people.map((p) => (
                       <tr key={p.username}>
                         <td className="rs-sticky">
-                          <strong>{p.username}</strong>
+                          <button
+                            className="rs-name"
+                            title={`Open all visits of ${p.username}`}
+                            onClick={() => setDetail({ person: p.username, from: data.from, to: data.to, label: `${data.from} → ${data.to}` })}
+                          >
+                            {p.username}
+                          </button>
                           {p.role === "team_leader" && <small> TL</small>}
                         </td>
                         {p.days.map((c) => (
                           <td key={c.date}>
                             <span
+                              role={c.visits ? "button" : undefined}
+                              onClick={
+                                c.visits
+                                  ? () => setDetail({ person: p.username, from: c.date, to: c.date, label: c.date })
+                                  : undefined
+                              }
                               className={`rs-cell ${c.status} ${c.leave ? c.leave.status : ""}`}
                               title={
                                 c.status === "reported"
@@ -225,6 +244,7 @@ export default function ReportStatus() {
                             </span>
                           </td>
                         ))}
+                        <td className="rs-num rs-green">{p.totals.visits}</td>
                         <td className="rs-num">{p.totals.reported}</td>
                         <td className="rs-num rs-blue">{p.totals.leave}</td>
                         <td className={`rs-num ${p.totals.missing ? "rs-red" : ""}`}>{p.totals.missing}</td>
@@ -310,6 +330,30 @@ export default function ReportStatus() {
           </div>
         </div>
       )}
+
+      {detail &&
+        createPortal(
+        <div className="v2-drawer-backdrop" onClick={() => setDetail(null)}>
+          <div className="v2-modal v2-modal-xl" role="dialog" aria-label="Visit details" onClick={(e) => e.stopPropagation()}>
+            <div className="section-head">
+              <div>
+                <h2>{detail.person}</h2>
+                <p className="section-subtext">All visits · {detail.label}</p>
+              </div>
+              <button className="ghost-btn" onClick={() => setDetail(null)} aria-label="Close">
+                <X size={16} />
+              </button>
+            </div>
+            <VisitSearch
+              key={`${detail.person}-${detail.from}-${detail.to}`}
+              isAdmin={isAdmin}
+              title="Visits"
+              initial={{ sales_person: detail.person, date_from: detail.from, date_to: detail.to }}
+            />
+          </div>
+        </div>,
+          document.body
+        )}
     </div>
   );
 }
