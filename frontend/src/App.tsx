@@ -2969,7 +2969,7 @@ const productSelectionLabel =
             {activeTab === "organization" && isAdmin && <OrgAdmin />}
             {activeTab === "dataHealth" && isAdmin && <DataHealth />}
             {activeTab === "leave" && <LeavePage role={userRole || ""} />}
-            {activeTab === "reportStatus" && <ReportStatus />}
+            {activeTab === "reportStatus" && <ReportStatus isAdmin={isAdmin} />}
             {activeTab === "multiYear" && canViewDashboards && (
               orgFilterActive && !selectedTeam && visibleTeams.length === 0 ? (
                 <div className="card"><p className="org-muted">No teams are mapped to this city/branch yet.</p></div>

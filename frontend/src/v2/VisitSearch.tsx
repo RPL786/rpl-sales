@@ -84,7 +84,7 @@ type Activity = {
   changes: { action: string; at: string; by: string; client_name: string; meeting_date: string }[];
 };
 
-type Filters = {
+export type Filters = {
   q: string;
   sales_person: string;
   team: string;
@@ -272,14 +272,18 @@ export default function VisitSearch({
   refreshKey = 0,
   onEdit,
   onDelete,
+  initial,
+  title = "Visit list",
 }: {
   isAdmin: boolean;
   refreshKey?: number;
   onEdit?: (v: VisitRow) => void;
   onDelete?: (id: number) => void;
+  initial?: Partial<Filters>;
+  title?: string;
 }) {
-  const [f, setF] = useState<Filters>(EMPTY);
-  const [typed, setTyped] = useState("");
+  const [f, setF] = useState<Filters>({ ...EMPTY, ...(initial || {}) });
+  const [typed, setTyped] = useState(initial?.q || "");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false);
@@ -397,7 +401,7 @@ export default function VisitSearch({
       <div className="card">
         <div className="section-head v2-wrap">
           <div>
-            <h2>Visit list</h2>
+            <h2>{title}</h2>
             <p className="section-subtext">Type any words in any order — customer, salesperson, product, status, notes or month.</p>
           </div>
           <div className="org-form-row">

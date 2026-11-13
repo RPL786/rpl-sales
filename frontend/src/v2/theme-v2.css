@@ -1806,3 +1806,11 @@ html[data-theme="day"] .v2-cal-day.leave { color: #1d4ed8; }
 html[data-theme="day"] .rs-cell.reported { color: #047857; }
 html[data-theme="day"] .rs-cell.leave, html[data-theme="day"] .rs-blue { color: #1d4ed8; }
 .rs-cell.today { border: 1px dashed var(--line); color: var(--muted, #94a3b8); }
+.v2-modal.v2-modal-xl { width: min(1180px, calc(100% - 24px)); max-height: calc(100vh - 24px); }
+.v2-modal-xl .v2-visit-search { margin-top: 4px; }
+.rs-name { background: none; border: 0; padding: 0; color: inherit; font: inherit; font-weight: 700; cursor: pointer; text-align: left; }
+.rs-name:hover { color: var(--accent); text-decoration: underline; }
+.rs-cell[role="button"] { cursor: pointer; }
+.rs-cell[role="button"]:hover { outline: 2px solid var(--accent); }
+.rs-green { color: #22c55e; }
+html[data-theme="day"] .rs-green { color: #047857; }
