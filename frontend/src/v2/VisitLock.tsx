@@ -5,6 +5,7 @@ import { apiJson } from "./authFetch";
 export type LockStatus = {
   today: string;
   exempt: boolean;
+  window_days?: number;
   allowed_dates: string[];
   earliest_allowed: string;
   unlock_hours: number;
@@ -76,8 +77,8 @@ export default function DateLockNotice({ date, meetingType = "" }: { date: strin
         <div>
           <strong>{date} is locked</strong>
           <small>
-            Visits can be entered for today and the previous 2 working days (from {st!.earliest_allowed}). Sundays are not
-            counted. An approved unlock opens a date for {st!.unlock_hours} hours.
+            Visits can be entered for today and the previous {st!.window_days ?? 2} working days (from {st!.earliest_allowed}).
+            Sundays are not counted. An approved unlock opens a date for {st!.unlock_hours} hours.
           </small>
         </div>
       </div>

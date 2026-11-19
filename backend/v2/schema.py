@@ -167,6 +167,25 @@ DDL = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_leaves_user_dates ON leaves (LOWER(TRIM(username)), date_from, date_to)",
+    # --- Simple app settings (e.g. visit window days) and visit-lock exemptions --------
+    """
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_by TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS visit_lock_exempt (
+        username_key TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        team TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        set_by TEXT,
+        set_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
 ]
 
 
