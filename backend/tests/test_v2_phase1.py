@@ -1082,17 +1082,18 @@ def test_report_status_missing_and_leave(client, admin, org):
     by = {c["date"]: c for c in ali["days"]}
     assert by["2026-11-01"]["status"] == "off"            # Sunday
     assert by["2026-10-28"]["status"] in {"missing", "reported", "leave"}
+    free = next(c["date"] for c in ali["days"] if c["status"] == "missing")
     raw_leave = client.post("/api/v2/leaves", headers=login(client, "ali", "pass1234"),
-                            json={"date_from": "2026-10-30", "reason_type": "Personal", "note": "bank work"})
+                            json={"date_from": free, "reason_type": "Personal", "note": "bank work"})
     assert raw_leave.status_code == 200, raw_leave.text
     r = client.get("/api/v2/visits/report-status?date_from=2026-10-26&date_to=2026-11-01", headers=admin).json()
     ali = next(p for p in r["people"] if p["username"] == "ali")
     assert ali["totals"]["visits"] == sum(c["visits"] for c in ali["days"])
     assert r["summary"]["visits"] == sum(p["totals"]["visits"] for p in r["people"])
-    c30 = next(c for c in ali["days"] if c["date"] == "2026-10-30")
+    c30 = next(c for c in ali["days"] if c["date"] == free)
     assert c30["status"] == "leave" and c30["leave"]["status"] == "pending" and c30["leave"]["reason"] == "Personal"
-    assert any(m["username"] == "ali" and m["date"] == "2026-10-30" for m in r["on_leave"])
-    assert not any(m["username"] == "ali" and m["date"] == "2026-10-30" for m in r["missing"])
+    assert any(m["username"] == "ali" and m["date"] == free for m in r["on_leave"])
+    assert not any(m["username"] == "ali" and m["date"] == free for m in r["missing"])
     # members see only themselves; Lahore team is not in the Karachi coordinator's view
     me = client.get("/api/v2/visits/report-status", headers=login(client, "ali", "pass1234")).json()
     assert [p["username"] for p in me["people"]] == ["ali"]
@@ -1100,3 +1101,53 @@ def test_report_status_missing_and_leave(client, admin, org):
     assert all(p["team"] != "Lahore Team" for p in coord["people"])
     x = client.get("/api/v2/visits/report-status/export?date_from=2026-10-26&date_to=2026-11-01", headers=admin)
     assert x.status_code == 200 and x.content[:2] == b"PK"
+
+
+def test_lock_controls_open_exempt_window(client, admin, org, monkeypatch):
+    from datetime import date
+    import v2.attendance as att
+    monkeypatch.setattr(att, "WINDOW_WORKING_DAYS", 2)
+    monkeypatch.setattr(att, "_today", lambda: date(2026, 11, 18))  # Wednesday
+    ali = login(client, "ali", "pass1234")
+    base = {"team": "Tile Adhesive", "sales_person": "ali", "client_name": "Ctrl Co", "client_category": "",
+            "product": "TA-100", "meeting_time": "10:00", "meeting_type": "Initial Visit",
+            "meeting_status": "Interested", "client_response": "", "notes": ""}
+    post = lambda d: client.post("/api/visit-entry", headers=ali, json={**base, "meeting_date": d})
+    assert post("2026-11-13").status_code == 403
+
+    tl = login(client, "saddam", "pass1234")
+    assert client.get("/api/v2/visit-lock/controls", headers=tl).status_code == 403
+    coord = login(client, "khi_coord", "pass1234")
+    c = client.get("/api/v2/visit-lock/controls", headers=coord).json()
+    assert any(p["username"] == "ali" for p in c["people"]) and not c["can_change_window"]
+    assert all(p["team"] != "Lahore Team" for p in c["people"])
+
+    # open a date for the whole team, directly
+    r = client.post("/api/v2/visit-lock/open", headers=coord, json={"target": "team", "team": "Tile Adhesive",
+                                                                    "date_from": "2026-11-13", "hours": 24, "reason": "Server was down"})
+    assert r.status_code == 200 and r.json()["people"] >= 2
+    assert post("2026-11-13").status_code == 200
+    g = next(x for x in client.get("/api/v2/visit-lock/controls", headers=coord).json()["open_dates"]
+             if x["username"] == "ali" and x["date"] == "2026-11-13")
+    assert client.post(f"/api/v2/visit-lock/open/{g['id']}/close", headers=coord).status_code == 200
+    assert post("2026-11-13").status_code == 403
+    # coordinator cannot reach Lahore
+    assert client.post("/api/v2/visit-lock/open", headers=coord, json={"target": "team", "team": "Lahore Team",
+                                                                       "date_from": "2026-11-13"}).status_code == 403
+
+    # lock off for one person, then on again
+    assert client.post("/api/v2/visit-lock/exempt", headers=coord,
+                       json={"target": "user", "username": "ali", "lock_off": True, "note": "senior"}).status_code == 200
+    assert post("2026-10-01").status_code == 200
+    assert client.get("/api/v2/visit-lock", headers=ali).json()["exempt"]
+    assert client.post("/api/v2/visit-lock/exempt", headers=coord,
+                       json={"target": "all", "lock_off": False}).status_code == 200
+    assert post("2026-10-02").status_code == 403
+
+    # window days: Super Admin only
+    assert client.put("/api/v2/visit-lock/settings", headers=coord, json={"window_days": 5}).status_code == 403
+    assert client.put("/api/v2/visit-lock/settings", headers=admin, json={"window_days": 5}).status_code == 200
+    assert client.get("/api/v2/visit-lock", headers=ali).json()["window_days"] == 5
+    assert post("2026-11-12").status_code == 200        # 5 working days back from Wed 18 = Thu 12
+    assert post("2026-11-11").status_code == 403
+    _raw_sql("DELETE FROM app_settings WHERE key = 'visit_window_days'")

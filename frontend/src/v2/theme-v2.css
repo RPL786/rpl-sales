@@ -1814,3 +1814,11 @@ html[data-theme="day"] .rs-cell.leave, html[data-theme="day"] .rs-blue { color: 
 .rs-cell[role="button"]:hover { outline: 2px solid var(--accent); }
 .rs-green { color: #22c55e; }
 html[data-theme="day"] .rs-green { color: #047857; }
+
+/* ---- Visit lock controls --------------------------------------------------- */
+.v2-lc { display: grid; gap: 14px; }
+.v2-lc-box { display: grid; gap: 10px; align-content: start; padding: 14px; border: 1px solid var(--line); border-radius: 16px; }
+.v2-lc-target { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.v2-lc-target .filter-select { flex: 1 1 200px; }
+.v2-lc-window { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.v2-lc-window .v2-leave-title { width: 100%; }

@@ -41,13 +41,31 @@ LEAVE_REASONS = ["Sick", "Personal", "Family", "Training / office work", "Public
 # helpers
 # ---------------------------------------------------------------------------
 
-def allowed_dates(today: date) -> List[date]:
-    """Today and every day back to the WINDOW_WORKING_DAYS-th previous working day.
+def window_days(cur) -> int:
+    """Previous working days open besides today: the admin setting, else the default."""
+    try:
+        cur.execute("SELECT value FROM app_settings WHERE key = 'visit_window_days'")
+        row = cur.fetchone()
+        if row and str(row[0]).isdigit():
+            return max(0, min(int(row[0]), 60))
+    except Exception:
+        pass
+    return WINDOW_WORKING_DAYS
+
+
+def _is_exempt(cur, username: str) -> bool:
+    cur.execute("SELECT 1 FROM visit_lock_exempt WHERE username_key = LOWER(TRIM(%s))", (username or "",))
+    return cur.fetchone() is not None
+
+
+def allowed_dates(today: date, n: Optional[int] = None) -> List[date]:
+    """Today and every day back to the n-th previous working day (default WINDOW_WORKING_DAYS).
 
     Sundays are not counted towards the window, but a Sunday inside it stays open
     (someone who worked on Sunday can still log it)."""
+    n = WINDOW_WORKING_DAYS if n is None else n
     out, d, working = [today], today, 0
-    while working < WINDOW_WORKING_DAYS:
+    while working < n:
         d -= timedelta(days=1)
         out.append(d)
         if d.weekday() != 6:
@@ -128,16 +146,19 @@ def check_visit_date(cur, user: dict, sales_person: str, meeting_date: str, meet
                                    "Cancel the leave first if they worked that day.")
     if role in LOCK_EXEMPT_ROLES:
         return
+    if _is_exempt(cur, person) or _is_exempt(cur, str(user.get("username") or "")):
+        return  # an Admin / City Coordinator turned the lock off for this person
 
+    n = window_days(cur)
     basis = _device_day(saved_at, today)
-    if day in allowed_dates(basis):
+    if day in allowed_dates(basis, n):
         return
     if _active_unlock(cur, person, day) or _active_unlock(cur, str(user.get("username") or ""), day):
         return
     raise HTTPException(
         status_code=403,
         detail=f"Visits for {day.isoformat()} are locked. You can enter visits for today and the previous "
-               f"{WINDOW_WORKING_DAYS} working days. Request an unlock in Leave & Unlock.",
+               f"{n} working days. Request an unlock in Leave & Unlock.",
     )
 
 
@@ -172,11 +193,14 @@ def lock_status(access: Access = Depends(get_access)):
             (access.username,),
         )
         mine = [_unlock_dict(r) for r in cur.fetchall()]
+        n = window_days(cur)
+        exempt = access.role in LOCK_EXEMPT_ROLES or _is_exempt(cur, access.username)
     return {
         "today": today.isoformat(),
-        "exempt": access.role in LOCK_EXEMPT_ROLES,
-        "allowed_dates": [d.isoformat() for d in allowed_dates(today)],
-        "earliest_allowed": min(allowed_dates(today)).isoformat(),
+        "exempt": exempt,
+        "window_days": n,
+        "allowed_dates": [d.isoformat() for d in allowed_dates(today, n)],
+        "earliest_allowed": min(allowed_dates(today, n)).isoformat(),
         "unlock_hours": UNLOCK_HOURS,
         "open_unlocks": [u["unlock_date"] for u in mine if u["status"] == "approved" and u["active"]],
         "my_requests": mine,
@@ -211,11 +235,11 @@ def request_unlock(payload: UnlockIn, access: Access = Depends(get_access)):
         raise HTTPException(status_code=400, detail="Please write a short reason (at least 5 characters)")
     if day > today:
         raise HTTPException(status_code=400, detail="Future dates do not need an unlock")
-    if day in allowed_dates(today):
-        raise HTTPException(status_code=400, detail="This date is already open for entry")
     if (today - day).days > 120:
         raise HTTPException(status_code=400, detail="Unlocks can be requested for the last 120 days only")
     with transaction() as cur:
+        if day in allowed_dates(today, window_days(cur)):
+            raise HTTPException(status_code=400, detail="This date is already open for entry")
         row = _user_row(cur, access.username)
         team = row[2] if row else access.home_team
         cur.execute(
@@ -482,3 +506,198 @@ def pending_counts(cur, access: Access) -> Dict[str, int]:
         out["leaves"] = sum(1 for t, u in cur.fetchall()
                             if _can_decide_for(access, t, LEAVE_APPROVER_ROLES) and norm(u) != norm(access.username))
     return out
+
+
+
+# ---------------------------------------------------------------------------
+# Lock controls for Super Admin / City Coordinator
+#   - open dates directly (one person, a team, or everyone in scope) for N hours
+#   - turn the lock off / on for one person, a team, or everyone in scope
+#   - change the window (working days), Super Admin only
+# ---------------------------------------------------------------------------
+
+CONTROL_ROLES = {"admin", "city_coordinator"}
+
+
+def _require_control(access: Access) -> None:
+    if access.role not in CONTROL_ROLES:
+        raise HTTPException(status_code=403, detail="Only a Super Admin or City Coordinator can change visit locks")
+
+
+def _field_people(cur, access: Access) -> List[dict]:
+    cur.execute(
+        """SELECT username, COALESCE(team, ''), role FROM users
+           WHERE role IN ('user', 'team_leader') AND COALESCE(is_active, TRUE)
+           ORDER BY LOWER(COALESCE(team, '')), LOWER(username)"""
+    )
+    return [{"username": u, "team": t, "role": r} for u, t, r in cur.fetchall() if access.allows_team(t)]
+
+
+def _targets(cur, access: Access, target: str, username: str, team: str) -> List[dict]:
+    people = _field_people(cur, access)
+    if target == "user":
+        sel = [p for p in people if norm(p["username"]) == norm(username)]
+        if not sel:
+            raise HTTPException(status_code=404, detail="Person not found in your scope")
+    elif target == "team":
+        if not team or not access.allows_team(team):
+            raise HTTPException(status_code=403, detail="This team is outside your assigned scope")
+        sel = [p for p in people if norm(p["team"]) == norm(team)]
+    elif target == "all":
+        sel = people
+    else:
+        raise HTTPException(status_code=400, detail="Target must be user, team or all")
+    if not sel:
+        raise HTTPException(status_code=400, detail="Nobody matches this choice")
+    return sel
+
+
+@router.get("/visit-lock/controls")
+def lock_controls(access: Access = Depends(get_access)):
+    _require_control(access)
+    with transaction() as cur:
+        people = _field_people(cur, access)
+        cur.execute("SELECT username_key, note, set_by, set_at FROM visit_lock_exempt")
+        ex = {k: {"note": n, "by": b, "at": a.isoformat() if a else None} for k, n, b, a in cur.fetchall()}
+        cur.execute(
+            """SELECT id, username, team, unlock_date, reason, decided_by, expires_at, requested_at
+               FROM visit_unlocks WHERE status = 'approved' AND expires_at > now()
+               ORDER BY unlock_date DESC, LOWER(username) LIMIT 500"""
+        )
+        grants = [
+            {"id": i, "username": u, "team": t, "date": str(d), "reason": r, "by": by,
+             "expires_at": e.isoformat() if e else None}
+            for i, u, t, d, r, by, e, _ in cur.fetchall() if access.allows_team(t)
+        ]
+        n = window_days(cur)
+    for p in people:
+        p["lock_off"] = ex.get(norm(p["username"]))
+    teams = sorted({p["team"] for p in people if p["team"]}, key=str.lower)
+    today = _today()
+    return {
+        "window_days": n,
+        "default_window_days": WINDOW_WORKING_DAYS,
+        "can_change_window": access.role == "admin",
+        "allowed_dates": [d.isoformat() for d in allowed_dates(today, n)],
+        "people": people,
+        "teams": teams,
+        "open_dates": grants,
+    }
+
+
+class WindowIn(BaseModel):
+    window_days: int
+
+
+@router.put("/visit-lock/settings")
+def set_window(payload: WindowIn, access: Access = Depends(get_access)):
+    if access.role != "admin":
+        raise HTTPException(status_code=403, detail="Only a Super Admin can change the visit window")
+    n = int(payload.window_days)
+    if n < 0 or n > 60:
+        raise HTTPException(status_code=400, detail="Choose between 0 and 60 working days")
+    with transaction() as cur:
+        old = window_days(cur)
+        cur.execute(
+            """INSERT INTO app_settings (key, value, updated_by, updated_at) VALUES ('visit_window_days', %s, %s, now())
+               ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()""",
+            (str(n), access.username),
+        )
+        audit.record(cur, access, "visit.window_change", "settings", "visit_window_days", {"from": old, "to": n})
+    return {"status": "ok", "window_days": n}
+
+
+class ExemptIn(BaseModel):
+    target: Literal["user", "team", "all"]
+    username: str = ""
+    team: str = ""
+    lock_off: bool
+    note: str = ""
+
+
+@router.post("/visit-lock/exempt")
+def set_exempt(payload: ExemptIn, access: Access = Depends(get_access)):
+    _require_control(access)
+    with transaction() as cur:
+        people = _targets(cur, access, payload.target, payload.username, payload.team)
+        for p in people:
+            if payload.lock_off:
+                cur.execute(
+                    """INSERT INTO visit_lock_exempt (username_key, username, team, note, set_by)
+                       VALUES (LOWER(TRIM(%s)), %s, %s, %s, %s)
+                       ON CONFLICT (username_key) DO UPDATE SET note = EXCLUDED.note, set_by = EXCLUDED.set_by,
+                                                                set_at = now(), team = EXCLUDED.team""",
+                    (p["username"], p["username"], p["team"], (payload.note or "").strip()[:300], access.username),
+                )
+            else:
+                cur.execute("DELETE FROM visit_lock_exempt WHERE username_key = LOWER(TRIM(%s))", (p["username"],))
+        audit.record(cur, access, "visit.lock_off" if payload.lock_off else "visit.lock_on", "visit_lock", payload.target,
+                     {"people": [p["username"] for p in people], "team": payload.team, "note": payload.note[:300]})
+    return {"status": "ok", "people": len(people)}
+
+
+class OpenIn(BaseModel):
+    target: Literal["user", "team", "all"]
+    username: str = ""
+    team: str = ""
+    date_from: str
+    date_to: str = ""
+    hours: int = UNLOCK_HOURS
+    reason: str = ""
+
+
+@router.post("/visit-lock/open")
+def open_dates(payload: OpenIn, access: Access = Depends(get_access)):
+    _require_control(access)
+    start = _parse_day(payload.date_from, "From date")
+    end = _parse_day(payload.date_to or payload.date_from, "To date")
+    if end < start:
+        start, end = end, start
+    today = _today()
+    if end > today:
+        raise HTTPException(status_code=400, detail="Future dates do not need opening")
+    if (end - start).days > 31:
+        raise HTTPException(status_code=400, detail="Open at most 31 days at a time")
+    if (today - start).days > 180:
+        raise HTTPException(status_code=400, detail="Dates older than 180 days cannot be opened")
+    hours = int(payload.hours)
+    if hours < 1 or hours > 168:
+        raise HTTPException(status_code=400, detail="Choose between 1 and 168 hours")
+    reason = (payload.reason or "").strip() or "Opened by " + access.username
+    with transaction() as cur:
+        people = _targets(cur, access, payload.target, payload.username, payload.team)
+        days = []
+        d = start
+        while d <= end:
+            days.append(d)
+            d += timedelta(days=1)
+        rows = 0
+        for p in people:
+            for d in days:
+                cur.execute(
+                    """INSERT INTO visit_unlocks (user_id, username, team, unlock_date, reason, status,
+                                                  decided_by, decided_at, expires_at, decision_note)
+                       SELECT u.id, %s, %s, %s, %s, 'approved', %s, now(), now() + make_interval(hours => %s), 'Opened directly'
+                       FROM (SELECT (SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(%s))) AS id) u""",
+                    (p["username"], p["team"], d.isoformat(), reason[:500], access.username, hours, p["username"]),
+                )
+                rows += 1
+        audit.record(cur, access, "visit.dates_opened", "visit_lock", payload.target,
+                     {"people": [p["username"] for p in people][:200], "from": start.isoformat(), "to": end.isoformat(),
+                      "hours": hours, "reason": reason[:300]})
+    return {"status": "ok", "people": len(people), "days": len(days), "grants": rows}
+
+
+@router.post("/visit-lock/open/{gid}/close")
+def close_opened(gid: int, access: Access = Depends(get_access)):
+    _require_control(access)
+    with transaction() as cur:
+        cur.execute("SELECT team, username, unlock_date FROM visit_unlocks WHERE id = %s AND status = 'approved'", (gid,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Not found")
+        if not access.allows_team(row[0]):
+            raise HTTPException(status_code=403, detail="This team is outside your assigned scope")
+        cur.execute("UPDATE visit_unlocks SET expires_at = now() WHERE id = %s", (gid,))
+        audit.record(cur, access, "visit.dates_closed", "visit_unlock", gid, {"username": row[1], "date": str(row[2])})
+    return {"status": "ok"}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { CalendarOff, Check, Loader2, Lock, RefreshCw, Send, Trash2, X } from "lucide-react";
 import { apiJson } from "./authFetch";
 import { loadLockStatus, type LockStatus } from "./VisitLock";
+import LockControls from "./LockControls";
 
 type Leave = {
   id: number;
@@ -279,6 +280,8 @@ export default function LeavePage({ role }: { role: string }) {
           </div>
         )}
       </div>
+
+      {(role === "admin" || role === "city_coordinator") && <LockControls />}
 
       {/* Approvals */}
       {canSeeUnlocks && (
