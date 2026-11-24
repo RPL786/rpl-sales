@@ -124,6 +124,13 @@ export default function QuickVisit({ canChooseOwner, onSaved, prefill }: Props) 
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
 
+  // "Future Scheduled" is only for upcoming meetings
+  useEffect(() => {
+    if (form.meeting_type === "Future Scheduled" && form.meeting_date < localDate()) {
+      setForm((f) => ({ ...f, meeting_type: "Initial Visit" }));
+    }
+  }, [form.meeting_date, form.meeting_type]);
+
   useEffect(() => {
     // product list is cached so the form still works without signal
     apiJson<{ products: { name: string }[] }>("/api/products")
@@ -347,7 +354,7 @@ export default function QuickVisit({ canChooseOwner, onSaved, prefill }: Props) 
         </div>
         <DateLockNotice date={form.meeting_date} meetingType={form.meeting_type} />
         <div className="v2-seg v2-qv-seg">
-          {MEETING_TYPES.map((t) => (
+          {MEETING_TYPES.filter((t) => t !== "Future Scheduled" || form.meeting_date >= localDate()).map((t) => (
             <button key={t} className={form.meeting_type === t ? "active" : ""} onClick={() => set("meeting_type", t)}>
               {t}
             </button>

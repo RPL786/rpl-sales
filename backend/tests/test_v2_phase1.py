@@ -1151,3 +1151,29 @@ def test_lock_controls_open_exempt_window(client, admin, org, monkeypatch):
     assert post("2026-11-12").status_code == 200        # 5 working days back from Wed 18 = Thu 12
     assert post("2026-11-11").status_code == 403
     _raw_sql("DELETE FROM app_settings WHERE key = 'visit_window_days'")
+
+
+def test_report_status_counts_late_logged_plan_as_visit(client, admin, org):
+    _raw_sql("UPDATE user_team_history SET start_date = '2026-01-01' WHERE LOWER(username) = 'ali'")
+    # a real visit on 2025-03-11 saved as "Future Scheduled" the next day (as in the field)
+    _raw_sql("""INSERT INTO visit_entries (created_by, created_at, team, sales_person, client_name, client_category, product,
+                meeting_date, meeting_time, meeting_type, meeting_status, client_response, order_amount, quantity,
+                future_potential, next_meeting_date, next_meeting_time, notes)
+                VALUES ('ali', '2026-03-12T04:13:00Z', 'Tile Adhesive', 'ali', 'Hafiz Works', '', 'TA-100',
+                '2026-03-11', '22:00', 'Future Scheduled', 'Need Follow-up', '', 0, 0, 0, '', '', 'visit with boss')""")
+    # a genuine plan made the day before: not a visit
+    _raw_sql("""INSERT INTO visit_entries (created_by, created_at, team, sales_person, client_name, client_category, product,
+                meeting_date, meeting_time, meeting_type, meeting_status, client_response, order_amount, quantity,
+                future_potential, next_meeting_date, next_meeting_time, notes)
+                VALUES ('ali', '2026-03-09T04:13:00Z', 'Tile Adhesive', 'ali', 'Plan Co', '', 'TA-100',
+                '2026-03-10', '10:00', 'Future Scheduled', 'Interested', '', 0, 0, 0, '', '', '')""")
+    r = client.get("/api/v2/visits/report-status?date_from=2026-03-09&date_to=2026-03-11", headers=admin).json()
+    ali = {c["date"]: c for c in next(p for p in r["people"] if p["username"] == "ali")["days"]}
+    assert ali["2026-03-11"]["status"] == "reported" and ali["2026-03-11"]["visits"] == 1
+    assert ali["2026-03-10"]["status"] != "reported"
+    # the form no longer accepts "Future Scheduled" for a past date
+    bad = client.post("/api/visit-entry", headers=admin, json={
+        "team": "Tile Adhesive", "sales_person": "ali", "client_name": "X", "client_category": "", "product": "TA-100",
+        "meeting_date": "2026-03-11", "meeting_time": "10:00", "meeting_type": "Future Scheduled",
+        "meeting_status": "Interested", "client_response": "", "notes": ""})
+    assert bad.status_code == 400 and "upcoming" in bad.json()["detail"]

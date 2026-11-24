@@ -45,6 +45,12 @@ _CREATED_LOCAL = (
     "CASE WHEN v.created_at ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}' "
     "THEN (v.created_at::timestamptz AT TIME ZONE 'Asia/Karachi') END"
 )
+# A visit counts as done on its meeting date. "Future Scheduled" entries are plans and do not count,
+# unless they were entered after the meeting date (then it was a real visit logged late).
+_DONE_VISIT = (
+    "(LOWER(COALESCE(v.meeting_type, '')) NOT LIKE 'future%%' OR "
+    f"(({_CREATED_LOCAL})::date > LEFT(v.meeting_date, 10)::date))"
+)
 _HAYSTACK = (
     "LOWER(CONCAT_WS(' ', v.meeting_date, v.team, v.sales_person, v.created_by, v.client_name, v.client_category, "
     "v.product, v.meeting_type, v.meeting_status, v.client_response, v.notes))"
@@ -391,10 +397,10 @@ def _report_status(access: Access, team: str, date_from: str, date_to: str):
         leaves = {}
         if keys:
             cur.execute(
-                """SELECT LOWER(TRIM(sales_person)), LEFT(meeting_date, 10), COUNT(*)
-                   FROM visit_entries
-                   WHERE LOWER(TRIM(sales_person)) = ANY(%s) AND LEFT(meeting_date, 10) BETWEEN %s AND %s
-                     AND LOWER(COALESCE(meeting_type, '')) NOT LIKE 'future%%'
+                f"""SELECT LOWER(TRIM(v.sales_person)), LEFT(v.meeting_date, 10), COUNT(*)
+                   FROM visit_entries v
+                   WHERE LOWER(TRIM(v.sales_person)) = ANY(%s) AND LEFT(v.meeting_date, 10) BETWEEN %s AND %s
+                     AND {_DONE_VISIT}
                    GROUP BY 1, 2""",
                 (keys, start.isoformat(), end.isoformat()),
             )
