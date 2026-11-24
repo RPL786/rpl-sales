@@ -137,6 +137,10 @@ def check_visit_date(cur, user: dict, sales_person: str, meeting_date: str, meet
             return
         raise HTTPException(status_code=400,
                             detail="A visit date cannot be in the future. Use \"Future Scheduled\" to plan a meeting.")
+    if is_plan and day < today:
+        raise HTTPException(status_code=400,
+                            detail="\"Future Scheduled\" is only for upcoming meetings. For a visit that already happened, "
+                                   "choose Initial Visit, Follow-up or Closing.")
 
     person = (sales_person or user.get("username") or "").strip()
     leave = _leave_on(cur, person, day)

@@ -858,7 +858,7 @@ export default function VisitForm() {
                     <option>Initial Visit</option>
                     <option>Follow-up</option>
                     <option>Closing</option>
-                    <option>Future Scheduled</option>
+                    {(meetingDate >= todayDate() || row.meeting_type === "Future Scheduled") && <option>Future Scheduled</option>}
                   </select>
                 </td>
                 <td>
